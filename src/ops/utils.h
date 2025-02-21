@@ -28,6 +28,15 @@ inline void assert_true(int expr, const char *msg, const char *file, int line) {
     printf("Error at %s:%d - %s\n", __FILE__, __LINE__, #EXPR); \
     exit(EXIT_FAILURE)
 
+#define WARN(msg)                                                                  \
+    do {                                                                           \
+        if constexpr (std::is_same_v<std::decay_t<decltype(msg)>, const char *>) { \
+            fprintf(stderr, "\033[33mWarning: %s\033[0m\n", msg);                  \
+        } else {                                                                   \
+            fprintf(stderr, "\033[33mWarning: %s\033[0m\n", #msg);                 \
+        }                                                                          \
+    } while (0)
+
 #define ROUND_UP_DIV(x, y) ((x + y - 1) / y)
 
 #define CHECK_ERROR(call, target, errCode)                   \

@@ -1,96 +1,82 @@
+#include "../conv_base/conv_base.h"
 #include "../utils.h"
-#include "operators.h"
 #include "ops/conv/conv.h"
+#include "ops/conv_act/conv_act.h"
 
-#ifdef ENABLE_CPU
-#include "cpu/conv_cpu.h"
-#endif
-#ifdef ENABLE_NV_GPU
-#include "../../devices/cuda/cuda_handle.h"
-#include "cuda/conv.cuh"
-#endif
+struct _ConvDescriptor {
+    Device device;
+    infiniopConvBaseDescriptor_t conv_base_desc;
+    infiniopConvActDescriptor_t conv_act_desc;
+};
 
-__C infiniopStatus_t infiniopCreateConvDescriptor(
-    infiniopHandle_t handle,
-    infiniopConvDescriptor_t *desc_ptr,
-    infiniopTensorDescriptor_t y,
-    infiniopTensorDescriptor_t x,
-    infiniopTensorDescriptor_t w,
-    void *pads,
-    void *strides,
-    void *dilations,
-    uint64_t n) {
-    switch (handle->device) {
-#ifdef ENABLE_CPU
-        case DevCpu:
-            return cpuCreateConvDescriptor(handle, (ConvCpuDescriptor_t *) desc_ptr, y, x, w, pads, strides, dilations, n);
-#endif
-#ifdef ENABLE_NV_GPU
-        case DevNvGpu: {
-            return cudaCreateConvDescriptor((CudaHandle_t) handle, (ConvCudaDescriptor_t *) desc_ptr, y, x, w, pads, strides, dilations, n);
-        }
+typedef struct _ConvDescriptor *_ConvDescriptor_t;
 
-#endif
-#ifdef ENABLE_CAMBRICON_MLU
-        // TODO
-#endif
+__C infiniopStatus_t infiniopCreateConvDescriptor(infiniopHandle_t handle,
+                                                  infiniopConvDescriptor_t *desc_ptr,
+                                                  infiniopTensorDescriptor_t y,
+                                                  infiniopTensorDescriptor_t x,
+                                                  infiniopTensorDescriptor_t w,
+                                                  infiniopTensorDescriptor_t b,
+                                                  uint64_t const *pads,
+                                                  int64_t const *strides,
+                                                  uint64_t const *dilations,
+                                                  uint64_t n) {
+    infiniopConvBaseDescriptor_t conv_base_desc = nullptr;
+    infiniopConvActDescriptor_t conv_act_desc = nullptr;
+    if (!b) {
+        CHECK_STATUS(infiniopCreateConvBaseDescriptor(handle, &conv_base_desc, y, x, w, pads, strides, dilations, n), STATUS_SUCCESS);
+    } else {
+        ConvActParam_t act_params;
+        CHECK_STATUS(infiniopCreateConvActDescriptor(handle, &conv_act_desc, y, x, w, b, pads, strides, dilations, n, INFINI_ACTIVATION_IDENTITY, act_params), STATUS_SUCCESS);
     }
-    return STATUS_BAD_DEVICE;
+
+    // create descriptor
+    *(_ConvDescriptor_t *) desc_ptr = new _ConvDescriptor{
+        handle->device,
+        conv_base_desc,
+        conv_act_desc,
+    };
+
+    return STATUS_SUCCESS;
 }
 
 __C infiniopStatus_t infiniopGetConvWorkspaceSize(infiniopConvDescriptor_t desc, uint64_t *size) {
-    switch (desc->device) {
-#ifdef ENABLE_CPU
-        case DevCpu:
-            return cpuGetConvWorkspaceSize((ConvCpuDescriptor_t) desc, size);
-#endif
-#ifdef ENABLE_NV_GPU
-        case DevNvGpu: {
-            return cudaGetConvWorkspaceSize((ConvCudaDescriptor_t) desc, size);
-        }
-
-#endif
-#ifdef ENABLE_CAMBRICON_MLU
-        // TODO
-#endif
+    _ConvDescriptor_t _conv_desc = (_ConvDescriptor_t) desc;
+    if (_conv_desc->conv_base_desc) {
+        CHECK_STATUS(infiniopGetConvBaseWorkspaceSize(_conv_desc->conv_base_desc, size), STATUS_SUCCESS);
+    } else {
+        CHECK_STATUS(infiniopGetConvActWorkspaceSize(_conv_desc->conv_act_desc, size), STATUS_SUCCESS);
     }
-    return STATUS_BAD_DEVICE;
+    return STATUS_SUCCESS;
 }
 
-__C infiniopStatus_t infiniopConv(infiniopConvDescriptor_t desc, void *workspace, uint64_t workspace_size, void *y, void const *x, void const *w, void *stream) {
-    switch (desc->device) {
-#ifdef ENABLE_CPU
-        case DevCpu:
-            return cpuConv((ConvCpuDescriptor_t) desc, workspace, workspace_size, y, x, w, stream);
-#endif
-#ifdef ENABLE_NV_GPU
-        case DevNvGpu: {
-            return cudaConv((ConvCudaDescriptor_t) desc, workspace, workspace_size, y, x, w, stream);
+__C infiniopStatus_t infiniopConv(infiniopConvDescriptor_t desc,
+                                  void *workspace,
+                                  uint64_t workspace_size,
+                                  void *y,
+                                  void const *x,
+                                  void const *w,
+                                  void const *b,
+                                  void *stream) {
+    _ConvDescriptor_t _conv_desc = (_ConvDescriptor_t) desc;
+    if (_conv_desc->conv_base_desc) {
+        CHECK_STATUS(infiniopConvBase(_conv_desc->conv_base_desc, workspace, workspace_size, y, x, w, stream), STATUS_SUCCESS);
+    } else {
+        if (!b) {
+            WARN("The bias descriptor has been initialized, but no bias data is provided. The computation will proceed as if there is no bias and continue as far as possible.");
         }
-
-#endif
-#ifdef ENABLE_CAMBRICON_MLU
-        // TODO
-#endif
+        CHECK_STATUS(infiniopConvAct(_conv_desc->conv_act_desc, workspace, workspace_size, y, x, w, b, stream), STATUS_SUCCESS);
     }
-    return STATUS_BAD_DEVICE;
+    return STATUS_SUCCESS;
 }
 
 __C infiniopStatus_t infiniopDestroyConvDescriptor(infiniopConvDescriptor_t desc) {
-    switch (desc->device) {
-#ifdef ENABLE_CPU
-        case DevCpu:
-            return cpuDestroyConvDescriptor((ConvCpuDescriptor_t) desc);
-#endif
-#ifdef ENABLE_NV_GPU
-        case DevNvGpu: {
-            return cudaDestroyConvDescriptor((ConvCudaDescriptor_t) desc);
-        }
-
-#endif
-#ifdef ENABLE_CAMBRICON_MLU
-        // TODO
-#endif
+    _ConvDescriptor_t _conv_desc = (_ConvDescriptor_t) desc;
+    if (_conv_desc->conv_base_desc) {
+        CHECK_STATUS(infiniopDestroyConvBaseDescriptor(_conv_desc->conv_base_desc), STATUS_SUCCESS);
+    } else {
+        CHECK_STATUS(infiniopDestroyConvActDescriptor(_conv_desc->conv_act_desc), STATUS_SUCCESS);
     }
-    return STATUS_BAD_DEVICE;
+    delete desc;
+    return STATUS_SUCCESS;
 }

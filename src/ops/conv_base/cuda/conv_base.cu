@@ -1,8 +1,8 @@
 #include "../../../devices/cuda/common_cuda.h"
 #include "../../utils.h"
-#include "conv.cuh"
+#include "conv_base.cuh"
 
-infiniopStatus_t conv_nv_gpu(ConvCudaDescriptor_t desc, void *workspace, uint64_t workspace_size,
+infiniopStatus_t conv_nv_gpu(ConvBaseCudaDescriptor_t desc, void *workspace, uint64_t workspace_size,
                              void *y, void const *x, void const *w, void *stream) {
     checkCudaError(cudaSetDevice(desc->device_id));
     checkCudnnError(use_cudnn(desc->cudnn_handles_t, desc->device_id, (cudaStream_t) stream,
@@ -12,10 +12,10 @@ infiniopStatus_t conv_nv_gpu(ConvCudaDescriptor_t desc, void *workspace, uint64_
     return STATUS_SUCCESS;
 }
 
-infiniopStatus_t cudaConv(ConvCudaDescriptor_t desc,
-                          void *workspace, uint64_t workspace_size,
-                          void *y, void const *x, void const *w,
-                          void *stream) {
+infiniopStatus_t cudaConvBase(ConvBaseCudaDescriptor_t desc,
+                              void *workspace, uint64_t workspace_size,
+                              void *y, void const *x, void const *w,
+                              void *stream) {
     if (desc->dtype == F16 || desc->dtype == F32) {
         return conv_nv_gpu(desc, workspace, workspace_size, y, x, w, stream);
     }

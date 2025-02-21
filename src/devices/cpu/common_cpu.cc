@@ -91,6 +91,7 @@ uint64_t getPaddedSize(uint64_t ndim, uint64_t *shape, uint64_t const *pads) {
 
 void getPaddedShape(uint64_t ndim, uint64_t const *shape, uint64_t const *pads, uint64_t *padded_shape) {
     memcpy(padded_shape, shape, ndim * sizeof(uint64_t));
+#pragma unroll
     for (size_t i = 2; i < ndim; ++i) {
         padded_shape[i] += 2 * pads[i - 2];
     }

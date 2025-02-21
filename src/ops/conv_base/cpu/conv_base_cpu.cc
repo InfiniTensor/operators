@@ -1,4 +1,4 @@
-#include "conv_cpu.h"
+#include "conv_base_cpu.h"
 #include "../../utils.h"
 
 // get the total number of elements in arr
@@ -12,15 +12,15 @@ inline bool requirePadding(uint64_t const *pads, uint64_t ndim) {
                        [](uint64_t pad) { return pad > 0; });
 }
 
-infiniopStatus_t cpuCreateConvDescriptor(infiniopHandle_t,
-                                         ConvCpuDescriptor_t *desc_ptr,
-                                         infiniopTensorDescriptor_t y,
-                                         infiniopTensorDescriptor_t x,
-                                         infiniopTensorDescriptor_t w,
-                                         void const *pads,
-                                         void const *strides,
-                                         void const *dilations,
-                                         uint64_t n) {
+infiniopStatus_t cpuCreateConvBaseDescriptor(infiniopHandle_t,
+                                             ConvBaseCpuDescriptor_t *desc_ptr,
+                                             infiniopTensorDescriptor_t y,
+                                             infiniopTensorDescriptor_t x,
+                                             infiniopTensorDescriptor_t w,
+                                             uint64_t const *pads,
+                                             int64_t const *strides,
+                                             uint64_t const *dilations,
+                                             uint64_t n) {
     uint64_t ndim = y->ndim;
     if (ndim < 3 || ndim != x->ndim || ndim != w->ndim) {
         return STATUS_BAD_TENSOR_SHAPE;
@@ -36,33 +36,37 @@ infiniopStatus_t cpuCreateConvDescriptor(infiniopHandle_t,
     }
 
     uint64_t y_size = getTotalSize(y->shape, ndim);
-    const auto pads_ = reinterpret_cast<uint64_t const *>(pads);
-    uint64_t padded_x_size = requirePadding(pads_, ndim) ? getPaddedSize(ndim, x->shape, pads_) : 0;
+    uint64_t padded_x_size = requirePadding(pads, ndim) ? getPaddedSize(ndim, x->shape, pads) : 0;
     uint64_t *x_shape = new uint64_t[ndim];
     uint64_t *w_shape = new uint64_t[ndim];
     uint64_t *y_shape = new uint64_t[ndim];
-    uint64_t *pad_ = new uint64_t[n];
+    uint64_t *pads_ = new uint64_t[n];
     int64_t *strides_ = new int64_t[n];
     uint64_t *dilations_ = new uint64_t[n];
     memcpy(x_shape, x->shape, ndim * sizeof(uint64_t));
     memcpy(w_shape, w->shape, ndim * sizeof(uint64_t));
     memcpy(y_shape, y->shape, ndim * sizeof(uint64_t));
-    for (size_t i = 0; i < n; ++i) {
-        pad_[i] = pads_[i];
-        strides_[i] = reinterpret_cast<int64_t const *>(strides)[i];
-        dilations_[i] = reinterpret_cast<uint64_t const *>(dilations)[i];
+    memcpy(pads_, pads, n * sizeof(*pads));
+    memcpy(strides_, strides, n * sizeof(*strides));
+    memcpy(dilations_, dilations, n * sizeof(*dilations));
+
+    uint64_t *padded_shape = nullptr;
+    if (padded_x_size > 0) {
+        padded_shape = new uint64_t[ndim];
+        getPaddedShape(ndim, x_shape, pads_, padded_shape);
     }
 
-    *desc_ptr = new ConvCpuDescriptor{
+    *desc_ptr = new ConvBaseCpuDescriptor{
         DevCpu,
         y->dt,
         ndim,
         y_size,
         padded_x_size,
+        padded_shape,
         x_shape,
         w_shape,
         y_shape,
-        pad_,
+        pads_,
         strides_,
         dilations_,
     };
@@ -70,7 +74,7 @@ infiniopStatus_t cpuCreateConvDescriptor(infiniopHandle_t,
     return STATUS_SUCCESS;
 }
 
-infiniopStatus_t cpuGetConvWorkspaceSize(ConvCpuDescriptor_t desc, uint64_t *size) {
+infiniopStatus_t cpuGetConvBaseWorkspaceSize(ConvBaseCpuDescriptor_t desc, uint64_t *size) {
     *size = desc->padded_x_size * desc->dtype.size;
     if (desc->dtype == F16) {
         *size += desc->y_size * sizeof(float);
@@ -78,7 +82,8 @@ infiniopStatus_t cpuGetConvWorkspaceSize(ConvCpuDescriptor_t desc, uint64_t *siz
     return STATUS_SUCCESS;
 }
 
-infiniopStatus_t cpuDestroyConvDescriptor(ConvCpuDescriptor_t desc) {
+infiniopStatus_t cpuDestroyConvBaseDescriptor(ConvBaseCpuDescriptor_t desc) {
+    delete[] desc->padded_shape;
     delete[] desc->x_shape;
     delete[] desc->w_shape;
     delete[] desc->y_shape;
@@ -91,7 +96,7 @@ infiniopStatus_t cpuDestroyConvDescriptor(ConvCpuDescriptor_t desc) {
 
 // initialize the padded input with the data from the original input
 template<typename Tdata>
-void fillPaddedInput(ConvCpuDescriptor_t desc, uint64_t const *padded_x_shape,
+void fillPaddedInput(ConvBaseCpuDescriptor_t desc, uint64_t const *padded_x_shape,
                      Tdata *padded_x, Tdata const *x,
                      uint64_t const *pads, uint64_t x_index,
                      uint64_t padded_x_index, uint64_t ndim) {
@@ -116,7 +121,7 @@ void fillPaddedInput(ConvCpuDescriptor_t desc, uint64_t const *padded_x_shape,
 
 // Recursive convolution function
 template<typename Xdata, typename Ydata>
-void _applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
+void _applyConv(ConvBaseCpuDescriptor_t desc, Ydata *y, Xdata const *x,
                 Xdata const *w, uint64_t const *x_shape,
                 uint64_t x_index, uint64_t w_index, uint64_t y_index,
                 uint64_t ndim) {
@@ -132,6 +137,7 @@ void _applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
 
     // perform all the convolutions along this axis
     for (size_t i = 0; i < steps; ++i, ++y_index) {
+#pragma unroll
         // perform a single convolution
         for (size_t k = 0; k < kernel_size; ++k) {
             // calculate the current indices
@@ -140,7 +146,7 @@ void _applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
 
             // base case (last dimension)
             if (ndim == desc->ndim - 1) {
-                if (desc->dtype == F16) {
+                if constexpr (std::is_same_v<Xdata, uint16_t>) {
                     y[y_index] += f16_to_f32(x[curr_x_index]) * f16_to_f32(w[curr_w_index]);
                 } else {
                     y[y_index] += x[curr_x_index] * w[curr_w_index];
@@ -156,12 +162,12 @@ void _applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
 }
 
 template<typename Xdata, typename Ydata>
-void applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
+void applyConv(ConvBaseCpuDescriptor_t desc, Ydata *y, Xdata const *x,
                Xdata const *w, uint64_t const *x_shape) {
     const auto y_num_channel_elements =
         getTotalSize(desc->y_shape + 2, desc->ndim - 2);
 
-#pragma omp parallel for collapse(2)
+#pragma omp parallel for collapse(2) schedule(dynamic)
     // batch
     for (size_t i = 0; i < x_shape[0]; ++i) {
 
@@ -180,16 +186,13 @@ void applyConv(ConvCpuDescriptor_t desc, Ydata *y, Xdata const *x,
 }
 
 template<typename Xdata, typename Ydata>
-void _conv_cpu(ConvCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
+void _conv_cpu(ConvBaseCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
                Ydata *y, Xdata const *x, Xdata const *w) {
     if (desc->padded_x_size > 0) {
         auto padded_x = reinterpret_cast<Xdata *>(workspace);
-        std::vector<uint64_t> padded_shape_(desc->ndim);
-        auto padded_shape = padded_shape_.data();
         std::fill(padded_x, padded_x + desc->padded_x_size, 0);
-        getPaddedShape(desc->ndim, desc->x_shape, desc->pads, padded_shape);
-        fillPaddedInput<Xdata>(desc, padded_shape, padded_x, x, desc->pads, 0, 0, 0);
-        applyConv<Xdata, Ydata>(desc, y, padded_x, w, padded_shape);
+        fillPaddedInput<Xdata>(desc, desc->padded_shape, padded_x, x, desc->pads, 0, 0, 0);
+        applyConv<Xdata, Ydata>(desc, y, padded_x, w, desc->padded_shape);
     } else {
         applyConv<Xdata, Ydata>(desc, y, x, w, desc->x_shape);
     }
@@ -197,7 +200,7 @@ void _conv_cpu(ConvCpuDescriptor_t desc, void *workspace, uint64_t workspace_siz
 
 // Convolution function
 template<typename Tdata>
-infiniopStatus_t conv_cpu(ConvCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
+infiniopStatus_t conv_cpu(ConvBaseCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
                           void *y, void const *x, void const *w) {
     auto y_ = reinterpret_cast<Tdata *>(y);
     auto x_ = reinterpret_cast<Tdata const *>(x);
@@ -209,7 +212,7 @@ infiniopStatus_t conv_cpu(ConvCpuDescriptor_t desc, void *workspace, uint64_t wo
 
 // sepcial case for fp16 (uint16_t)
 template<>
-infiniopStatus_t conv_cpu<uint16_t>(ConvCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
+infiniopStatus_t conv_cpu<uint16_t>(ConvBaseCpuDescriptor_t desc, void *workspace, uint64_t workspace_size,
                                     void *y, void const *x, void const *w) {
     auto y_ = reinterpret_cast<float *>(workspace);
     auto x_ = reinterpret_cast<uint16_t const *>(x);
@@ -227,10 +230,10 @@ infiniopStatus_t conv_cpu<uint16_t>(ConvCpuDescriptor_t desc, void *workspace, u
     return STATUS_SUCCESS;
 }
 
-infiniopStatus_t cpuConv(ConvCpuDescriptor_t desc,
-                         void *workspace, uint64_t workspace_size,
-                         void *y, void const *x, void const *w,
-                         void *stream) {
+infiniopStatus_t cpuConvBase(ConvBaseCpuDescriptor_t desc,
+                             void *workspace, uint64_t workspace_size,
+                             void *y, void const *x, void const *w,
+                             void *stream) {
     if (desc->dtype == F16) {
         return conv_cpu<uint16_t>(desc, workspace, workspace_size, y, x, w);
     }
