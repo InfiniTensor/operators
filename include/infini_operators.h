@@ -6,6 +6,7 @@
 #include "ops/clip/clip.h"
 #include "ops/global_avg_pool/global_avg_pool.h"
 #include "ops/expand/expand.h"
+#include "ops/gather/gather.h"
 #include "ops/gemm/gemm.h"
 #include "ops/conv/conv.h"
 #include "ops/matmul/matmul.h"
