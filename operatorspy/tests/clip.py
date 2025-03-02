@@ -56,7 +56,7 @@ def test(
 
     # 计算正确的结果（pytorch 的 clamp 不支持 min 和 max 均为空，跳过这种情况）
     if (min_val is not None) or (max_val is not None):
-      ans = clip(input_data, min, max)
+        ans = clip(input_data, min, max)
 
     # 将 torch 张量转换为 infiniop 张量
     input_tensor = to_tensor(input_data, lib)
@@ -96,7 +96,7 @@ def test(
 
     # 检查结果是否正确（pytorch 的 clamp 不支持 min 和 max 均为空，跳过这种情况的比较，动态库支持这种操作）
     if (min_val is not None) or (max_val is not None):
-      assert torch.allclose(output_data, ans, atol=0, rtol=0)
+        assert torch.allclose(output_data, ans, atol=0, rtol=0)
 
     # 销毁 clip 算子描述符
     check_error(lib.infiniopDestroyClipDescriptor(descriptor))
