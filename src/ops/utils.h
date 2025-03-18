@@ -104,6 +104,33 @@ inline bool getBroadcastShape(const uint64_t *shape1, uint64_t ndim1,
     return true;
 }
 
+inline bool getBroadcastShape(const uint64_t *shape1, uint64_t ndim1,
+                              const uint64_t *shape2, uint64_t ndim2,
+                              const uint64_t *shape3, uint64_t ndim3,
+                              uint64_t *broadcast_shape, uint64_t *padded_shape1,
+                              uint64_t *padded_shape2, uint64_t *padded_shape3,
+                              uint64_t max_rank) {
+    // prepending and initializing
+    std::fill(padded_shape1, padded_shape1 + max_rank, 1);
+    std::fill(padded_shape2, padded_shape2 + max_rank, 1);
+    std::fill(padded_shape3, padded_shape3 + max_rank, 1);
+    std::copy(shape1, shape1 + ndim1, padded_shape1 + max_rank - ndim1);
+    std::copy(shape2, shape2 + ndim2, padded_shape2 + max_rank - ndim2);
+    std::copy(shape3, shape3 + ndim3, padded_shape3 + max_rank - ndim3);
+
+    // compute broadcasted shape
+    for (size_t i = 0; i < max_rank; ++i) {
+        if ((padded_shape1[i] == padded_shape2[i] || padded_shape1[i] == 1 || padded_shape2[i] == 1) &&
+            (padded_shape1[i] == padded_shape3[i] || padded_shape1[i] == 1 || padded_shape3[i] == 1)) {
+            broadcast_shape[i] = std::max(std::max(padded_shape1[i], padded_shape2[i]), padded_shape3[i]);
+        } else {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // check if the shape of tensor c is valid after broadcasting tensors a and b and also get the broadcasted shapes
 inline bool isValidBroadcastShape(infiniopTensorDescriptor_t a, infiniopTensorDescriptor_t b, infiniopTensorDescriptor_t c,
                                   uint64_t broadcast_ndim) {
@@ -224,7 +251,7 @@ inline infiniopTensorDescriptor_t dim_merge(infiniopTensorDescriptor_t desc, uin
 // split the dimension dim of a tensor descriptor into multiple dimensions
 inline infiniopTensorDescriptor_t dim_split(infiniopTensorDescriptor_t desc, uint64_t dim, const std::vector<uint64_t> &dims) {
     uint64_t ndim = desc->ndim;
-    if (desc->shape[dim] != std::accumulate(dims.begin(), dims.end(), (uint64_t)1, std::multiplies{})) {
+    if (desc->shape[dim] != std::accumulate(dims.begin(), dims.end(), (uint64_t) 1, std::multiplies{})) {
         return nullptr;
     }
     uint64_t new_ndim = ndim + dims.size() - 1;
