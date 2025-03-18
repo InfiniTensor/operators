@@ -101,7 +101,6 @@ def test(
     check_error(
         lib.infiniopGetReduceMinWorkspaceSize(descriptor, ctypes.byref(workspaceSize))
     )
-    print("workspaceSize: ", workspaceSize.value)
     workspace = torch.zeros(int(workspaceSize.value), dtype=torch.uint8).to(torch_device)
     workspace_ptr = ctypes.cast(workspace.data_ptr(), ctypes.POINTER(ctypes.c_uint8))
 
