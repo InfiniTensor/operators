@@ -23,7 +23,7 @@ from typing import Tuple
 # constant for control whether profile the pytorch and lib functions
 # NOTE: need to manually add synchronization function to the lib function,
 #       e.g., cudaDeviceSynchronize() for CUDA
-PROFILE = False
+PROFILE = True
 NUM_PRERUN = 10
 NUM_ITERATIONS = 1000
 

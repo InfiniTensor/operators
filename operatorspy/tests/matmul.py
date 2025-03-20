@@ -22,9 +22,9 @@ from operatorspy import (
 from operatorspy.tests.test_utils import get_args, synchronize_device
 import torch
 
-PROFILE = False
+PROFILE = True
 NUM_PRERUN = 10
-NUM_ITERATIONS = 1000
+NUM_ITERATIONS = 50
 
 class MatmulDescriptor(Structure):
     _fields_ = [("device", c_int32)]

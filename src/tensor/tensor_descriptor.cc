@@ -1,6 +1,7 @@
 #include "tensor/tensor_descriptor.h"
 #include <cstring>
 
+
 __C __export infiniopStatus_t infiniopCreateTensorDescriptor(infiniopTensorDescriptor_t *desc_ptr, uint64_t ndim, uint64_t const *shape_, int64_t const *strides_, DataLayout datatype) {
     uint64_t *shape = new uint64_t[ndim];
     int64_t *strides = new int64_t[ndim];

@@ -45,6 +45,8 @@ infiniopHandle_t = POINTER(Handle)
 def open_lib():
     def find_library_in_ld_path(library_name):
         ld_library_path = LIB_OPERATORS_DIR
+
+        print(LIB_OPERATORS_DIR)
         paths = ld_library_path.split(os.pathsep)
         for path in paths:
             full_path = os.path.join(path, library_name)
