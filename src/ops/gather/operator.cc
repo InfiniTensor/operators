@@ -10,13 +10,12 @@
 #ifdef ENABLE_MTHREADS_GPU
 #endif
 
-__C infiniopStatus_t infiniopCreateGatherDescriptor(
-    infiniopHandle_t handle,
-    infiniopGatherDescriptor_t *desc_ptr,
-    infiniopTensorDescriptor_t output,
-    infiniopTensorDescriptor_t data,
-    infiniopTensorDescriptor_t indices,
-    int64_t axis) {
+__C infiniopStatus_t infiniopCreateGatherDescriptor(infiniopHandle_t handle,
+                                                    infiniopGatherDescriptor_t *desc_ptr,
+                                                    infiniopTensorDescriptor_t output,
+                                                    infiniopTensorDescriptor_t data,
+                                                    infiniopTensorDescriptor_t indices,
+                                                    int64_t axis) {
     switch (handle->device) {
 #ifdef ENABLE_CPU
         case DevCpu:

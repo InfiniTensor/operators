@@ -101,7 +101,7 @@ def test(
                            indices_tensor.data, 
                            None)
     )
-    assert torch.allclose(output, ans, atol=0, rtol=1e-3)
+    assert torch.allclose(output, ans, atol=0, rtol=0)
     check_error(lib.infiniopDestroyGatherDescriptor(descriptor))
 
 
@@ -127,11 +127,10 @@ if __name__ == "__main__":
         ((3, 3), (2, ), 0, Inplace.OUT_OF_PLACE),
         ((4, 3, 4), (2, 2), 1, Inplace.OUT_OF_PLACE),
         ((5, 3, 4, 5), (3, 2), 2, Inplace.OUT_OF_PLACE),
+        ((32, 20, 512), (2, 16), 0, Inplace.OUT_OF_PLACE),
 
+        # ((32, 256, 112, 112), (, 112, 1), 0, Inplace.OUT_OF_PLACE),
         # ((), (), (), Inplace.OUT_OF_PLACE),
-        # ((32, 20, 512), (32, 20, 512), 0, Inplace.OUT_OF_PLACE),
-        # ((3, 2, 4, 5), (4, 5), 0, Inplace.OUT_OF_PLACE),
-        # ((32, 256, 112, 112), (32, 256, 112, 1), 0, Inplace.OUT_OF_PLACE),
     ]
 
     args = get_args()

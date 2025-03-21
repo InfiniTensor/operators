@@ -95,7 +95,7 @@ def test(
                          None)
     )
     # print(f"  min:{min_value}, max:{max_value}, input:{input}, ans:{ans}, output:{output},")
-    assert torch.allclose(output, ans, atol=0, rtol=1e-3)
+    assert torch.allclose(output, ans, atol=0, rtol=0)
     check_error(lib.infiniopDestroyClipDescriptor(descriptor))
 
 

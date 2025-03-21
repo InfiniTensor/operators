@@ -122,7 +122,8 @@ infiniopStatus_t gather_cpu(GatherCpuDescriptor_t desc,
 
     for (uint64_t outer = 0; outer < outer_; ++outer) {
         for (uint64_t idx = 0; idx < indices_element_count; ++idx) {
-            Tindices index_val = indices_[idx];// bounds [-s, s-1]
+            Tindices index_val = indices_[idx];
+            // bounds [-s, s-1]
             index_val = (index_val + desc->data_shape[axis]) % desc->data_shape[axis];
 
             const uint64_t data_offset = outer * desc->data_shape[axis] * cpy_len +

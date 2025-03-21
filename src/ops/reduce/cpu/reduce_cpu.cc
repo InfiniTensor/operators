@@ -107,7 +107,8 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
             bool is_axis = false;
             for(uint64_t j = 0; j < axes_ndim; j++) {
                 // printf("\t\tdata-dim %lu, axes-dim %lu, axes is %lu\n", i, j, axes[j]);
-                if (axes[j] == i) {
+                uint64_t axe = (axes[j] + data_ndim) % data_ndim;
+                if (axe == i) {
                     is_axis = true;
                     break;
                 }
@@ -128,13 +129,17 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
         // ?
         // sort(axes_.begin(), axes_.end());
         // sort(reduced_axes_.begin(), reduced_axes_.end());
+
+        // [-r,r-1], r = rank(data)
         axes_axes = new int64_t[axes_ndim];
         for (int i = 0; i < axes_ndim; i ++) {
             axes_axes[i] = axes_vec[i];
+            // axes_axes[i] = (axes_vec[i] + data_ndim) % data_ndim;
         }
         reduced_axes = new int64_t[reduced_ndim];
         for (int i = 0; i < reduced_ndim; i ++) {
             reduced_axes[i] = reduced_axes_vec[i];
+            // reduced_axes[i] = (reduced_axes_vec[i] + data_ndim) % data_ndim;
         }
 
         // 

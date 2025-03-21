@@ -97,7 +97,7 @@ def test(
     )
 
     # print(f"--ans:{ans}, output:{output}")
-    assert torch.allclose(output, ans, atol=0, rtol=1e-3)
+    assert torch.allclose(output, ans, atol=0, rtol=0)
     check_error(lib.infiniopDestroyWhereDescriptor(descriptor))
 
 
