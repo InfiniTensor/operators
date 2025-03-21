@@ -67,7 +67,8 @@ def test(
     #     return
 
     data = torch.rand(data_shape, dtype=tensor_dtype).to(torch_device)
-    indices = torch.randint(0, data.shape[axis], data_shape, device=torch_device).to(torch.int32)
+    # indices = torch.randint(0, data.shape[axis], data_shape, device=torch_device).to(torch.int32)
+    indices = torch.randint(-data.shape[axis], data.shape[axis], data_shape, device=torch_device).to(torch.int32)
     # ans = gather(data, indices, axis)
     ans = gather(len(data_shape), axis, data, indices)
     # output = torch.zeros(o_shape, dtype=tensor_dtype).to(torch_device) 
