@@ -53,7 +53,7 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
     int64_t *data_strides = new int64_t[data_ndim];
     memcpy(data_strides, data->strides, data_ndim * sizeof(int64_t));
     int64_t *reduced_strides;
-    int64_t *axes_strides;
+    int64_t *anti_out_strides;
     
     // axes is empty
     if (axes_ndim == 0) {
@@ -65,8 +65,8 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
             for (int i = 0; i < axes_ndim; i ++) {
                 axes_axes[i] = i;
             }
-            axes_strides = new int64_t[axes_ndim];
-            memcpy(axes_strides, data_strides, axes_ndim * sizeof(int64_t));
+            anti_out_strides = new int64_t[axes_ndim];
+            memcpy(anti_out_strides, data_strides, axes_ndim * sizeof(int64_t));
 
             reduced_ndim = 1;
             reduced_size = 1;
@@ -78,7 +78,7 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
             axes_ndim = 0;
             axes_size = 0;
             axes_axes = nullptr;
-            axes_strides = new int64_t[axes_ndim];
+            anti_out_strides = new int64_t[axes_ndim];
 
             reduced_ndim = data_ndim;
             reduced_size = data_size;
@@ -143,11 +143,11 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
         }
 
         // 
-        axes_strides = new int64_t[axes_ndim];
+        anti_out_strides = new int64_t[axes_ndim];
         for(uint64_t i = 0; i < axes_ndim; i++) {
-            axes_strides[i] = 1;
+            anti_out_strides[i] = 1;
             for(uint64_t j = i + 1; j < axes_ndim; j++) {
-                axes_strides[i] *= data->shape[axes[j]];
+                anti_out_strides[i] *= data->shape[axes[j]];
             }
         }
 
@@ -182,9 +182,9 @@ infiniopStatus_t cpuCreateReduceDescriptor(infiniopHandle_t handle,
         reduced_axes,
         axes_axes,
 
-        reduced_strides,
         data_strides,
-        axes_strides,
+        reduced_strides,
+        anti_out_strides,
 
         keepdims,
         reduce_type
@@ -201,7 +201,7 @@ infiniopStatus_t cpuDestroyReduceDescriptor(ReduceCpuDescriptor_t desc) {
     delete[] (desc->axes);
     delete[] (desc->reduced_strides);
     delete[] (desc->data_strides);
-    delete[] (desc->axes_strides);
+    delete[] (desc->anti_out_strides);
     delete desc;
     // printf("\t--delete desc\n");
     return STATUS_SUCCESS;
@@ -226,9 +226,9 @@ infiniopStatus_t reduce_cpu(ReduceCpuDescriptor_t desc,
     auto reduced_axes_ = desc->reduced_axes;
     auto axes_ = desc->axes;
 
-    auto reduced_strides_ = desc->reduced_strides;
     auto data_strides_ = desc->data_strides;
-    auto axes_strides_ = desc->axes_strides;
+    auto reduced_strides_ = desc->reduced_strides;
+    auto anti_out_strides_ = desc->anti_out_strides;
 
     auto reduce_mode_ = desc->reduce_mode;
     
@@ -318,15 +318,19 @@ infiniopStatus_t reduce_cpu(ReduceCpuDescriptor_t desc,
         uint64_t idx = 0;
         uint64_t temp_i = i;
         for(uint64_t j = 0; j < reduced_ndim_; j++) {
+            // 将 reduced 张量的多维索引映射到 data 张量的线性索引
             idx += temp_i / reduced_strides_[j] * data_strides_[reduced_axes_[j]];
             temp_i %= reduced_strides_[j];
         }
         for(uint64_t j = 0; j < axes_size_; j++) {
             uint64_t data_idx_ = idx;
             uint64_t temp_j = j;
-            for(uint64_t k = 0; k < axes_ndim_; k++) {
-                data_idx_ += temp_j / axes_strides_[k] * data_strides_[axes_[k]];
-                temp_j %= axes_strides_[k];
+
+            // reduced_ndim + axes_ndim = data_ndim
+            for (uint64_t k = 0; k < axes_ndim_; k++) {
+                // 继续
+                data_idx_ += temp_j / anti_out_strides_[k] * data_strides_[axes_[k]];
+                temp_j %= anti_out_strides_[k];
             }
 
             if constexpr (std::is_same<Tdata, uint16_t>::value) {

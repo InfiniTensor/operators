@@ -21,12 +21,12 @@ struct ReduceCpuDescriptor {
     uint64_t data_size;
     uint64_t axes_size;
 
-    int64_t const *reduced_axes;
+    int64_t const *reduced_axes; //在 data 中需要保留的维度
     int64_t const *axes;
     
-    int64_t const *reduced_strides;
     int64_t const *data_strides;
-    int64_t const *axes_strides;
+    int64_t const *reduced_strides;
+    int64_t const *anti_out_strides;
 
     // int reduce_element_num;
     bool keepdims;
