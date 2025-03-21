@@ -21,6 +21,7 @@ infiniopStatus_t cpuCreateGatherDescriptor(infiniopHandle_t,
                                            infiniopTensorDescriptor_t data,
                                            infiniopTensorDescriptor_t indices,
                                            int64_t axis = 0) {
+    // printf("\tcpuCreateGatherDescriptor\n");
     uint64_t indices_ndim = indices->ndim;// rank q
     uint64_t data_ndim = data->ndim;      // rank r
     uint64_t ndim = output->ndim;         // q+r-1
@@ -39,13 +40,24 @@ infiniopStatus_t cpuCreateGatherDescriptor(infiniopHandle_t,
     }
     // q+r-1
     if (ndim != indices_ndim + data_ndim - 1) {
+        printf("\tseems wrong shape\n");
         return STATUS_BAD_TENSOR_SHAPE;
     }
     // [-r, r-1]
-    if (axis < -data_ndim || axis > data_ndim - 1) {
+    // 0 < -2  || 0 > 1
+    if (axis < (int64_t)(-data_ndim) || axis > (int64_t)(data_ndim - 1)) {
+        // axis:0, data_ndim:2
+        printf("\tseems wrong dim, axis:%ld, data_ndim:%ld\n", axis, data_ndim);
+        if (axis > data_ndim - 1) {
+            printf("\t%ld > %ld\n", axis, data_ndim - 1);
+        }
+        if (axis < 0-data_ndim) {
+            printf("\t%ld < %ld\n", axis, -data_ndim);
+        }
         return STATUS_BAD_PARAM;
     }
     axis = (axis + data_ndim) % data_ndim;
+    // printf("\tcheck over\n");
 
     // uint64_t o_data_size = std::accumulate(output->shape, output->shape + output->ndim, 1ULL, std::multiplies<uint64_t>());
 
@@ -102,6 +114,7 @@ infiniopStatus_t gather_cpu(GatherCpuDescriptor_t desc,
                             void *output,
                             void const *data,
                             void const *indices) {
+    // printf("\tgather_cpu\n");
     auto data_ = reinterpret_cast<Tdata const *>(data);
     auto output_ = reinterpret_cast<Tdata *>(output);
     auto indices_ = reinterpret_cast<Tindices const *>(indices);

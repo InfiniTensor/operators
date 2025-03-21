@@ -59,7 +59,8 @@ def test(
     y = torch.rand(y_shape, dtype=tensor_dtype).to(torch_device)
     output = torch.rand(o_shape, dtype=tensor_dtype).to(torch_device) \
         if inplace == Inplace.OUT_OF_PLACE else (x if inplace == Inplace.INPLACE_X else y)
-    condition = torch.randint(0, 2, condition_shape, dtype=torch.uint8).to(torch_device)
+    condition_ = torch.randint(0, 2, condition_shape, dtype=torch.bool).to(torch_device)
+    condition = condition_.to(dtype=torch.uint8).to(torch_device)
 
     descriptor = infiniopWhereDescriptor_t()
     x_tensor = to_tensor(x, lib)
@@ -68,7 +69,7 @@ def test(
         if inplace == Inplace.OUT_OF_PLACE else (x_tensor if inplace == Inplace.INPLACE_X else y_tensor)
     condition_tensor = to_tensor(condition, lib)
 
-    ans = where(condition, x, y)
+    ans = where(condition_, x, y)
 
     check_error(
         lib.infiniopCreateWhereDescriptor(

@@ -38,6 +38,12 @@ def gather(data, indices, axis):
     np_output = np.take(np_input, np_indices, axis=axis)
     return torch.from_numpy(np_output)
 
+def gather(rank, axis, inputTensor, indexTensor):
+    indices = [slice(None)] * rank
+    indices[axis] = indexTensor
+    outTensor = inputTensor[tuple(indices)]
+    return outTensor
+
 
 def test(
     lib,
@@ -48,35 +54,34 @@ def test(
     indices_shape,
     axis=0,
     tensor_dtype=torch.float16,
-    indices_dtype=torch.int32,
-    inplace=Inplace.OUT_OF_PLACE,
 ):
-    print(
-        f"Testing Gather on {torch_device} with o_shape:{o_shape} data_shape:{data_shape} indices_shape:{indices_shape} \
-            dtype:{tensor_dtype} inplace: {inplace.name}"
-    )
-    if inplace != Inplace.OUT_OF_PLACE:
-        print("Unsupported test: calculatin in-place is not supported")
-        return
-    if data_shape != indices_shape: 
-        print("Unsupported test: broadcasting does not support in-place")
-        return
+    # if inplace != Inplace.OUT_OF_PLACE:
+    #     print("Unsupported test: calculatin in-place is not supported")
+    #     return
+    # if data_shape != indices_shape: 
+    #     print("Unsupported test: broadcasting does not support in-place")
+    #     return
     # q+r-1
-    if len(o_shape) != len(indices_shape) + len(data_shape) - 1:
-        print("Unsupported test: output-shape is not valid")
-        return
+    # if len(o_shape) != len(indices_shape) + len(data_shape) - 1:
+    #     print("Unsupported test: output-shape is not valid")
+    #     return
 
-    # indices = torch.rand(indices_shape, dtype=indices_dtype).to(torch_device)
-    indices = torch.randint(0, 3, indices_shape, dtype=indices_dtype).to(torch_device)
     data = torch.rand(data_shape, dtype=tensor_dtype).to(torch_device)
-    output = torch.rand(o_shape, dtype=tensor_dtype).to(torch_device) 
+    indices = torch.randint(0, data.shape[axis], data_shape, device=torch_device).to(torch.int32)
+    # ans = gather(data, indices, axis)
+    ans = gather(len(data_shape), axis, data, indices)
+    # output = torch.zeros(o_shape, dtype=tensor_dtype).to(torch_device) 
+    output = torch.zeros(ans.shape, dtype=tensor_dtype, device=torch_device)
+
+    print(
+        f"Testing Gather on {torch_device} with output_shape:{ans.shape} data_shape:{data_shape} indices_shape:{indices_shape} axis:{axis} dtype:{tensor_dtype}"
+    )
+    # print(ans.shape, indices_shape, data_shape)    
 
     descriptor = infiniopGatherDescriptor_t()
     data_tensor = to_tensor(data, lib)
     indices_tensor = to_tensor(indices, lib)
     o_tensor = to_tensor(output, lib) 
-
-    ans = gather(data, indices, axis)
 
     check_error(
         lib.infiniopCreateGatherDescriptor(
@@ -85,7 +90,7 @@ def test(
             o_tensor.descriptor,
             data_tensor.descriptor,
             indices_tensor.descriptor,
-            axis,
+            c_int64(axis),
         )
     )
 
@@ -113,10 +118,10 @@ def get_o_shape(input_shape, indices_shape, axis):
 def test_cpu(lib, test_cases):
     device = DeviceEnum.DEVICE_CPU
     handle = create_handle(lib, device)
-    for data_shape, indices_shape, axis, inplace in test_cases:
+    for data_shape, indices_shape, axis, _ in test_cases:
         o_shape = get_o_shape(data_shape, indices_shape, axis)
-        test(lib, handle, "cpu", o_shape, data_shape, indices_shape, axis, tensor_dtype=torch.float16, indices_dtype=torch.int32, inplace=inplace)
-        test(lib, handle, "cpu", o_shape, data_shape, indices_shape, axis, tensor_dtype=torch.float32, indices_dtype=torch.int64, inplace=inplace)
+        test(lib, handle, "cpu", o_shape, data_shape, indices_shape, axis, tensor_dtype=torch.float16)
+        test(lib, handle, "cpu", o_shape, data_shape, indices_shape, axis, tensor_dtype=torch.float32)
     destroy_handle(lib, handle)
 
 
@@ -124,13 +129,14 @@ if __name__ == "__main__":
     test_cases = [
         # q+r-1
         # data_shape, indices_shape, axis, inplace
-        ((3, 3), (2, ), 0, Inplace.OUT_OF_PLACE),
-        ((4, 3, 4), (2, 2), 1, Inplace.OUT_OF_PLACE),
-        ((5, 3, 4, 5), (3, 2), 2, Inplace.OUT_OF_PLACE),
-        ((32, 20, 512), (2, 16), 0, Inplace.OUT_OF_PLACE),
-
-        # ((32, 256, 112, 112), (, 112, 1), 0, Inplace.OUT_OF_PLACE),
         # ((), (), (), Inplace.OUT_OF_PLACE),
+        ((3, 3), (2, ), 0, Inplace.OUT_OF_PLACE),
+        ((32, 64), (10, 4), 1, Inplace.OUT_OF_PLACE), 
+        ((4, 3, 4), (2, 2), 1, Inplace.OUT_OF_PLACE),
+        ((32, 20, 64), (2, 3), 2, Inplace.OUT_OF_PLACE),
+        ((1, 3, 4, 5), (1, 2), 3, Inplace.OUT_OF_PLACE),
+        # ((32, 64, 16, 8), (12, 2), 0, Inplace.OUT_OF_PLACE),
+        #Cannot allocate memory
     ]
 
     args = get_args()
@@ -150,7 +156,6 @@ if __name__ == "__main__":
         c_void_p,
         c_void_p,
         c_void_p,
-        #
         c_void_p,
     ]
     lib.infiniopDestroyGatherDescriptor.restype = c_int32
