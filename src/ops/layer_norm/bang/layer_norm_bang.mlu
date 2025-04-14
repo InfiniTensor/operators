@@ -1,0 +1,392 @@
+#include "bang.h"
+#include "cnrt.h"
+#include "layer_norm_bang.h"
+#include "../../../devices/bang/common_bang.h"
+
+const int SRC_MAX_SIZE = 1024 * 16;
+__nram__  char nram_buffer[NRAM_MAX_SIZE];
+
+template<typename T>
+__mlu_global__ void layer_norm(T const *input, T const *scale, T const *bias, T *output, T *tmpGdram, float eps, int size, int behindsize, int bSize){
+    int frontsize = size / behindsize;
+    const int wSize = 128 / sizeof(T);
+
+    const int maxNum = SRC_MAX_SIZE / sizeof(T);
+    
+
+    T *src = (T *)nram_buffer;//[maxNum]
+    T *destSum = src + 3 * maxNum;//[3 * maxNum]
+    T *destSumFinal = destSum + maxNum;//[wSize]
+    T *s_src = destSumFinal + wSize;//[3 * maxNum]
+    T *b_src = s_src + 3 * maxNum;//[3 * maxNum]
+    //bSize是大于等于behindsize的最小2次幂
+   
+    if (behindsize >= taskDim * maxNum){
+        int segNum = maxNum / wSize;
+        int taskSize = taskDim * maxNum;
+        int remain = behindsize % taskSize;
+        int repeat = (behindsize - remain) / taskSize;
+
+        int remainT = remain % taskDim;
+        int stepEasy = (remain - remainT) / taskDim;
+        int stepHard = stepEasy + 1;
+        int step = (taskId < remainT ? stepHard : stepEasy);
+        int indStart = repeat * taskSize + (taskId < remainT ? taskId * stepHard : (remainT * stepHard + (taskId - remainT) * stepEasy));
+        for(int i = 0; i < frontsize; i++){
+            int tid = i * behindsize;
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            for(int j = 0; j < repeat + 1; j++){
+                if(j < repeat){
+                    __memcpy_async(src + j % 2 * maxNum, input + tid + j * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0){
+                    __bang_add(destSum, destSum, src + (j - 1) % 2 * maxNum, maxNum);
+                }
+                __sync_all_ipu();
+            }
+            if(step){
+                __bang_write_zero(src, maxNum);
+                __memcpy(src, input + tid + indStart, step * sizeof(T), GDRAM2NRAM);
+                __bang_add(destSum, destSum, src, maxNum);
+            }
+            __bang_mul_scalar(destSum, destSum, 1.0 / behindsize, maxNum);
+            for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                for(int i = 0; i < strip ; i++){
+                    __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                } 
+            }
+            __bang_reduce_sum(destSumFinal, destSum, wSize);//destSumFinal[0]存储的是当前task对应数据的规约和
+            tmpGdram[taskId] = destSumFinal[0];
+            __sync_all();
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            __memcpy(destSum, tmpGdram, taskDim * sizeof(T), GDRAM2NRAM);
+            __bang_reduce_sum(destSumFinal, destSum, wSize);
+            T mu = destSumFinal[0];
+            //下面计算方差
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            for(int j = 0; j < repeat + 1; j++){
+                if (j < repeat){
+                    __memcpy_async(src + j % 2 * maxNum, input + tid + j * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0){
+                    __bang_sub_scalar(src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, mu, maxNum);
+                    __bang_mul(src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, maxNum);
+                    __bang_add(destSum, destSum, src + (j - 1) % 2 * maxNum, maxNum);
+                }
+                __sync_all_ipu();
+            }
+            if (step){
+                __bang_write_value(src, maxNum, mu);//保证后面减去均值为0
+                __memcpy(src, input + tid + indStart, step * sizeof(T), GDRAM2NRAM);
+                __bang_sub_scalar(src, src, mu, maxNum);
+                __bang_mul(src, src, src, maxNum);
+                __bang_add(destSum, destSum, src, maxNum);
+            }
+            __bang_mul_scalar(destSum, destSum, 1.0 / behindsize, maxNum);
+            for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                for(int i = 0; i < strip ; i++){
+                    __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                } 
+            }
+            __bang_reduce_sum(destSumFinal, destSum, wSize);//destSumFinal[0]存储的是当前task对应数据的规约和
+            
+            tmpGdram[taskId] = destSumFinal[0];
+            __sync_all();
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            __memcpy(destSum, tmpGdram, taskDim * sizeof(T), GDRAM2NRAM);
+            __bang_reduce_sum(destSumFinal, destSum, wSize);
+            T sigma2 = destSumFinal[0] + static_cast<T>(eps);
+            sigma2 = 1.0 / pow(sigma2, 0.5);
+            //下面开始做变换
+            for(int j = 0; j < repeat + 2; j++){
+                if(j < repeat){
+                    __memcpy_async(src + j % 3 * maxNum, input + tid + j * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                    __memcpy_async(s_src + j % 3 * maxNum, scale + j * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                    __memcpy_async(b_src + j % 3 * maxNum, bias + j * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0 && j < repeat + 1){
+                    __bang_sub_scalar(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, mu, maxNum);
+                    __bang_mul_scalar(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, sigma2, maxNum);
+                    __bang_mul(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, s_src + (j - 1) % 3 * maxNum, maxNum);
+                    __bang_add(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, b_src + (j - 1) % 3 * maxNum, maxNum);
+                }
+                if(j > 1){
+                    __memcpy_async(output + tid + (j - 2) * taskSize + taskId * maxNum, src + (j - 2) % 3 * maxNum, maxNum * sizeof(T), NRAM2GDRAM);
+                }
+                __sync_all_ipu();
+            }
+            if (step){
+                __memcpy(src, input + tid + indStart, step * sizeof(T), GDRAM2NRAM);
+                __memcpy(s_src, scale + indStart, step * sizeof(T), GDRAM2NRAM);
+                __memcpy(b_src, bias + indStart, step * sizeof(T), GDRAM2NRAM);
+                __bang_sub_scalar(src, src, mu, maxNum);
+                __bang_mul_scalar(src, src, sigma2, maxNum);
+                __bang_mul(src, src, s_src, maxNum);
+                __bang_add(src, src, b_src, maxNum);
+                __memcpy(output + tid + indStart, src, step * sizeof(T), NRAM2GDRAM);
+            }
+        }
+    }
+    else if(behindsize >= maxNum && behindsize < taskDim * maxNum){
+        int segNum = maxNum / wSize;
+        int remainT = behindsize % maxNum;
+        int repeat = (behindsize - remainT) / maxNum;
+
+        int remain = frontsize % taskDim;
+        int stepEasy = (frontsize - remain) / taskDim;
+        int stepHard = stepEasy + 1;
+        int step = (taskId < remain ? stepHard : stepEasy);
+        int indStart = (taskId < remain ? taskId * stepHard : (remain * stepHard + (taskId - remain) * stepEasy));
+        for(int i = indStart; i < indStart + step; i++){
+            int tid = i * behindsize;
+            //下面开始计算均值
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            for(int j = 0; j < repeat + 1; j++){
+                if (j < repeat){
+                    __memcpy_async(src + j % 2 * maxNum, input + tid + j * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0){
+                    __bang_add(destSum, destSum, src + (j - 1) % 2 * maxNum, maxNum);
+                }
+                __sync_all_ipu();
+            }
+            if (remainT){
+                __bang_write_zero(src, maxNum);
+                __memcpy(src, input + tid + repeat * maxNum, remainT * sizeof(T), GDRAM2NRAM);
+                __bang_add(destSum, destSum, src, maxNum);
+            }
+            
+            for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                for(int i = 0; i < strip ; i++){
+                    __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                } 
+            }
+            __bang_reduce_sum(destSumFinal, destSum, wSize);
+            //下面开始计算方差,destSumFinal[0]存储的就是均值
+            T mu = destSumFinal[0] / behindsize;
+            __bang_write_zero(destSum, maxNum);
+            __bang_write_zero(destSumFinal, wSize);
+            for(int j = 0; j < repeat + 1; j++){
+                if(j < repeat){
+                    __memcpy_async(src + j % 2 * maxNum, input + tid + j * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0){
+                    __bang_sub_scalar(src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, mu, maxNum);
+                    __bang_mul(src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, src + (j - 1) % 2 * maxNum, maxNum);
+                    __bang_add(destSum, destSum, src + (j - 1) % 2 * maxNum, maxNum);
+                }
+                __sync_all_ipu();
+            }
+            if (remainT){
+                __bang_write_value(src, maxNum, mu);//保证后面减去均值为0
+                __memcpy(src, input + tid + repeat * maxNum, remainT * sizeof(T), GDRAM2NRAM);
+                __bang_sub_scalar(src, src, mu, maxNum);
+                __bang_mul(src, src, src, maxNum);
+                __bang_add(destSum, destSum, src, maxNum);
+            }
+            
+            for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                for(int i = 0; i < strip ; i++){
+                    __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                } 
+            }
+            __bang_reduce_sum(destSumFinal, destSum, wSize);
+            T sigma2 = destSumFinal[0] / behindsize + static_cast<T>(eps);
+            sigma2 = 1.0 / pow(sigma2, 0.5);
+            //下面开始做变换
+            for(int j = 0; j < repeat + 2; j++){
+                if(j < repeat){
+                    __memcpy_async(src + j % 3 * maxNum, input + tid + j * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                    __memcpy_async(s_src + j % 3 * maxNum, scale + j * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                    __memcpy_async(b_src + j % 3 * maxNum, bias + j * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
+                }
+                if(j > 0 && j < repeat + 1){
+                    __bang_sub_scalar(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, mu, maxNum);
+                    __bang_mul_scalar(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, sigma2, maxNum);
+                    __bang_mul(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, s_src + (j - 1) % 3 * maxNum, maxNum);
+                    __bang_add(src + (j - 1) % 3 * maxNum, src + (j - 1) % 3 * maxNum, b_src + (j - 1) % 3 * maxNum, maxNum);
+                }
+                if(j > 1){
+                    __memcpy_async(output + tid + (j - 2) * maxNum, src + (j - 2) % 3 * maxNum, maxNum * sizeof(T), NRAM2GDRAM);
+                }
+                __sync_all_ipu();
+            }
+            if(remainT){
+                __memcpy(src, input + tid + repeat * maxNum, remainT * sizeof(T), GDRAM2NRAM);
+                __memcpy(s_src, scale + repeat * maxNum, remainT * sizeof(T), GDRAM2NRAM);
+                __memcpy(b_src, bias + repeat * maxNum, remainT * sizeof(T), GDRAM2NRAM);
+                __bang_sub_scalar(src, src, mu, maxNum);
+                __bang_mul_scalar(src, src, sigma2, maxNum);
+                __bang_mul(src, src, s_src, maxNum);
+                __bang_add(src, src, b_src, maxNum);
+                __memcpy(output + tid + repeat * maxNum, src, remainT * sizeof(T), NRAM2GDRAM);
+            }
+        }
+    }
+    else{
+        int multiple = maxNum / behindsize;//一个core一次可以处理multiple个behindsize
+        int taskSize = taskDim * multiple;
+        int remainT = frontsize % taskSize;
+        int repeat = (frontsize - remainT) / taskSize;
+        int remain = remainT % taskDim;
+        int stepEasy = (remainT - remain) / taskDim;
+        int stepHard = stepEasy + 1;
+        int step = (taskId < remain ? stepHard : stepEasy);
+        int indStart = (taskId < remain ? taskId * stepHard : (remain * stepHard + (taskId - remain) * stepEasy));
+        int segNum = bSize / wSize;
+        __memcpy(s_src, scale, behindsize * sizeof(T), GDRAM2NRAM);
+        __memcpy(b_src, bias, behindsize * sizeof(T), GDRAM2NRAM);
+        int tid;
+        for(int i = 0; i < repeat + 2; i++){
+            if(i < repeat){
+                tid = i * taskSize * behindsize;
+                __memcpy_async(src + i % 3 * maxNum, input + tid + taskId * multiple * behindsize, multiple * behindsize * sizeof(T), GDRAM2NRAM);
+            }
+            if(i > 0 && i < repeat + 1){
+                for(int m = 0; m < multiple; m++){
+                    __bang_write_zero(destSum, maxNum);
+                    __bang_write_zero(destSumFinal, wSize);
+                    __bang_add(destSum, destSum, src + (i - 1) % 3 * maxNum + m *behindsize, behindsize);
+                    for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                        for(int i = 0; i < strip ; i++){
+                            __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                        } 
+                    }
+                    __bang_reduce_sum(destSumFinal, destSum, wSize);//destSumFinal[0] / behindsize = mu
+                    T mu = destSumFinal[0] / behindsize;
+                    __bang_write_zero(destSum, maxNum);
+                    __bang_sub_scalar(destSum, src + (i - 1) % 3 * maxNum + m * behindsize, mu, behindsize);
+                    
+                    __bang_mul(destSum, destSum, destSum, bSize);
+                    __bang_write_zero(destSumFinal, wSize);
+                    for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                        for(int i = 0; i < strip ; i++){
+                            __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                        } 
+                    }
+                    
+                    __bang_reduce_sum(destSumFinal, destSum, wSize);
+                    T sigma2 = 1.0 / (pow(destSumFinal[0] / behindsize + static_cast<T>(eps), 0.5));
+                    //下面开始做变换
+                    __bang_sub_scalar(src + (i - 1) % 3 * maxNum + m * behindsize, src + (i - 1) % 3 * maxNum + m * behindsize, mu, behindsize);
+                    __bang_mul_scalar(src + (i - 1) % 3 * maxNum + m * behindsize, src + (i - 1) % 3 * maxNum + m * behindsize, sigma2, behindsize);
+                    __bang_mul(src + (i - 1) % 3 * maxNum + m * behindsize, src + (i - 1) % 3 * maxNum + m * behindsize, s_src, behindsize);
+                    __bang_add(src + (i - 1) % 3 * maxNum + m * behindsize, src + (i - 1) % 3 * maxNum + m * behindsize, b_src, behindsize);
+                }
+            }
+            if(i > 1){
+                tid = (i - 2) * taskSize * behindsize;
+                __memcpy_async(output + tid + taskId * multiple * behindsize, src + (i - 2) % 3 * maxNum, multiple * behindsize * sizeof(T), NRAM2GDRAM);
+            }
+            __sync_all_ipu();
+        }
+        if(step){
+            int tid = (repeat * taskSize + indStart) * behindsize;
+            __memcpy(src, input + tid, step * behindsize * sizeof(T), GDRAM2NRAM);
+            for(int m = 0; m < step; m++){
+                __bang_write_zero(destSum, maxNum);
+                __bang_write_zero(destSumFinal, wSize);
+                __bang_add(destSum, destSum, src + m *behindsize, behindsize);
+                for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                    for(int i = 0; i < strip ; i++){
+                        __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                    } 
+                }
+                __bang_reduce_sum(destSumFinal, destSum, wSize);//destSumFinal[0] / behindsize = mu
+                T mu = destSumFinal[0] / behindsize;
+                __bang_write_zero(destSum, maxNum);
+                __bang_sub_scalar(destSum, src + m * behindsize, mu, behindsize);
+                
+                __bang_mul(destSum, destSum, destSum, bSize);
+                __bang_write_zero(destSumFinal, wSize);
+                for(int strip = segNum/2; strip > 0; strip = strip / 2){
+                    for(int i = 0; i < strip ; i++){
+                        __bang_add(destSum + i * wSize, destSum + i * wSize, destSum + (i + strip) * wSize, wSize);
+                    } 
+                }
+                
+                __bang_reduce_sum(destSumFinal, destSum, wSize);
+                T sigma2 = 1.0 / (pow(destSumFinal[0] / behindsize + static_cast<T>(eps), 0.5));
+                //下面开始做变换
+                __bang_sub_scalar(src + m * behindsize, src + m * behindsize, mu, behindsize);
+                __bang_mul_scalar(src + m * behindsize, src + m * behindsize, sigma2, behindsize);
+                __bang_mul(src + m * behindsize, src + m * behindsize, s_src, behindsize);
+                __bang_add(src + m * behindsize, src + m * behindsize, b_src, behindsize);
+
+            }
+            __memcpy(output + tid, src, step * behindsize * sizeof(T), NRAM2GDRAM);
+        }
+    }
+}
+template<typename T>
+void layer_normUnion(cnrtQueue_t queue, void *workspace,
+                                          uint64_t workspace_size, void const *input, void const *scale, void const *bias, void *output, float eps, int size, int behindsize){
+    int wSize = 128 / sizeof(T);
+    int bSize;
+    float mi = log2(behindsize);
+    if (floor(mi) == mi)
+    {
+        bSize = behindsize;
+    }
+    else
+    {
+        bSize = static_cast<int>(pow(2, floor(mi) + 1));
+    }
+    if (bSize < wSize)
+    {
+        bSize = wSize;
+    }
+    auto source = reinterpret_cast<const T *>(input);
+    auto weight = reinterpret_cast<const T *>(scale);
+    auto _bias = reinterpret_cast<const T *>(bias);
+    auto destination = reinterpret_cast<T *>(output);
+
+    cnrtDim3_t k_dim;
+    cnrtFunctionType_t k_type;
+
+    k_dim.x = 4;
+    k_dim.y = 1;
+    k_dim.z = 1;
+
+    k_type = CNRT_FUNC_TYPE_UNION1;
+    T *tmpGdram = reinterpret_cast<T *>(workspace);
+    
+    layer_norm<T><<<k_dim, k_type, queue>>>(source, weight, _bias, destination, tmpGdram, eps, size, behindsize, bSize);
+    
+    cnrtQueueSync(queue);
+}
+void layer_norm_bang(LayerNormBangDescriptor_t desc, void *workspace,
+                                          uint64_t workspace_size, void const *x, void const *w, void const *b, void *y, 
+                             void *stream){
+    auto queue = reinterpret_cast<cnrtQueue_t>(stream);                            
+    auto eps = desc->epsilon;//float
+    int size = desc->size;
+    int behindsize = desc->behindsize;
+    if (dtype_eq(desc->dtype, F16)){
+        layer_normUnion<half>(queue, workspace, workspace_size, x, w, b, y, eps, size, behindsize);
+    }
+    else if (dtype_eq(desc->dtype, F32)){
+        layer_normUnion<float>(queue, workspace, workspace_size, x, w, b, y, eps, size, behindsize);
+    }
+}
+infiniopStatus_t bangLayerNorm(LayerNormBangDescriptor_t desc, void *workspace,
+                                          uint64_t workspace_size,
+                                   void const *x, 
+                                   void const *w, 
+                                   void const *b, 
+                                   void *y,
+                                   void *stream) {
+    if (cnrtSetDevice(desc->device_id) != cnrtSuccess) {
+        return STATUS_BAD_DEVICE;
+    }
+    if (dtype_eq(desc->dtype, F16) || dtype_eq(desc->dtype, F32)) {
+        layer_norm_bang(desc, workspace, workspace_size, x, w, b, y, stream);
+        return STATUS_SUCCESS;
+    }
+    return STATUS_BAD_TENSOR_DTYPE;
+}

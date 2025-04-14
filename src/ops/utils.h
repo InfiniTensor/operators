@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
-
+#include <functional>
 /* This file contains some useful macros and helper functions */
 
 // check if an expression is true, and if not, print an error message and abort the program
