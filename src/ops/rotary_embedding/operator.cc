@@ -15,6 +15,9 @@
 #ifdef ENABLE_ASCEND_NPU
 #include "ascend/rotary_embedding.h"
 #endif
+#ifdef ENABLE_TECO_SDAA
+#include "teco/rotary_embedding_sdaa.h"
+#endif
 
 struct RoPEDescriptor {
     Device device;
@@ -53,6 +56,15 @@ __C infiniopStatus_t infiniopCreateRoPEDescriptor(infiniopHandle_t handle,
                                               cos_table);
         }
 #endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoCreateRoPEDescriptor((TecoHandle_t) handle,
+                                            (RoPETecoDescriptor_t *) desc_ptr,
+                                            t,
+                                            pos_ids,
+                                            sin_table,
+                                            cos_table);
+#endif
     }
     return STATUS_BAD_DEVICE;
 }
@@ -79,6 +91,11 @@ __C infiniopStatus_t infiniopGetRoPEWorkspaceSize(infiniopRoPEDescriptor_t desc,
             return ascendGetRoPEWorkspaceSize((RoPEAscendDescriptor_t) desc,
                                               size);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoGetRoPEWorkspaceSize((RoPETecoDescriptor_t) desc,
+                                            size);
 #endif
     }
     return STATUS_BAD_DEVICE;
@@ -120,6 +137,16 @@ __C infiniopStatus_t infiniopRoPE(infiniopRoPEDescriptor_t desc,
                               stream);
         }
 #endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoRoPE((RoPETecoDescriptor_t) desc, workspace,
+                            workspace_size,
+                            t,
+                            pos_ids,
+                            sin_table,
+                            cos_table,
+                            stream);
+#endif
     }
     return STATUS_BAD_DEVICE;
 }
@@ -145,6 +172,10 @@ __C infiniopStatus_t infiniopDestroyRoPEDescriptor(infiniopRoPEDescriptor_t desc
         case DevAscendNpu: {
             return ascendDestroyRoPEDescriptor((RoPEAscendDescriptor_t) desc);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoDestroyRoPEDescriptor((RoPETecoDescriptor_t) desc);
 #endif
     }
     return STATUS_BAD_DEVICE;

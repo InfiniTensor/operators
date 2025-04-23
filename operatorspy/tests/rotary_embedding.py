@@ -165,6 +165,14 @@ def test_ascend(lib, test_cases) :
         test(lib, handle, "npu", shape, strides, dtype)
     destroy_handle(lib, handle)
 
+def test_teco(lib, test_cases):
+    import torch_sdaa
+    device = DeviceEnum.DEVICE_TECO
+    handle = create_handle(lib, device)
+    for shape, strides, dtype in test_cases:
+        test(lib, handle, "sdaa", shape, strides, dtype)
+    destroy_handle(lib, handle) 
+
 if __name__ == "__main__":
     test_cases = [
         ((1, 32, 128), None, torch.float16),
@@ -215,5 +223,7 @@ if __name__ == "__main__":
         test_bang(lib, test_cases)
     if args.ascend:
         test_ascend(lib, test_cases)
+    if args.teco:
+        test_teco(lib, test_cases)
     if not (args.cpu or args.cuda or args.bang or args.ascend):
         test_cpu(lib, test_cases)
