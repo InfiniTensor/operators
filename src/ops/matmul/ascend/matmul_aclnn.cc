@@ -105,7 +105,7 @@ infiniopStatus_t aclnnMatmul(MatmulAclnnDescriptor_t desc,
     auto &workspaceSize = desc->workspaceSize;
 
     // Set runing on handle device
-    aclrtSetDevice(desc->device_id);
+    // aclrtSetDevice(desc->device_id);
 
     for (int i = 0; i < batch; i++) {
         AclSetTensorAddr(executor, 0, ta, (char *) (a) + i * desc->info->a_matrix.stride * desc->dtype.size);

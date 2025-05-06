@@ -160,7 +160,7 @@ infiniopStatus_t aclnnRMSNorm(RMSNormAclnnDescriptor_t desc,
     auto rstd = (void *) ((uint8_t *) workspace + workspaceSize);
     
     // Set device
-    aclrtSetDevice(desc->device_id);
+    // aclrtSetDevice(desc->device_id);
     aclnnStatus ret;
 
     void *castPtr = nullptr;

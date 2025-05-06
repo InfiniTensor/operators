@@ -60,7 +60,7 @@ infiniopStatus_t ascendSwiGLU(SwiGLUAscendDescriptor_t desc,
     auto dt = desc->dtype;
     
     // Set device
-    aclrtSetDevice(desc->device_id);
+    // aclrtSetDevice(desc->device_id);
 
     return swiglu_kernel_do(c, (void *) a, (void *) b, 1.0, seq_len, di, sta, stb, stc, dt, stream);
 }

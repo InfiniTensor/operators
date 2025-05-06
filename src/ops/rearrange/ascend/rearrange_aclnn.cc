@@ -52,7 +52,7 @@ infiniopStatus_t aclnnRearrange(RearrangeAclnnDescriptor_t desc,
                                 void const *src,
                                 void *stream) {
     // Set runing on handle device
-    aclrtSetDevice(desc->device_id);
+    // aclrtSetDevice(desc->device_id);
 
     /// TODO: something is wrong with aclSetTensorAddr, do all the preparation here for now
     desc->dstDesc->t = aclCreateTensor(desc->dstDesc->shape.data(),

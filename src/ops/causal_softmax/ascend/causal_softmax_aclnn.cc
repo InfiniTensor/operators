@@ -160,7 +160,7 @@ infiniopStatus_t aclnnCausalSoftmax(CausalSoftmaxAclnnDescriptor_t desc,
     auto &maskAddr = desc->maskAddr;
 
     // Set runing on handle device
-    aclrtSetDevice(desc->device_id);
+    // aclrtSetDevice(desc->device_id);
 
     AclSetTensorAddr(executor, 0, ta, data);
     AclSetTensorAddr(executor, 2, tmask, maskAddr);
