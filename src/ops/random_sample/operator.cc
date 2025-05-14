@@ -14,6 +14,9 @@
 #ifdef ENABLE_ASCEND_NPU
 #include "ascend/random_sample.h"
 #endif
+#ifdef ENABLE_TECO_SDAA
+#include "teco/random_sample_teco.h"
+#endif
 
 __C infiniopStatus_t infiniopCreateRandomSampleDescriptor(infiniopHandle_t handle, infiniopRandomSampleDescriptor_t *desc_ptr, infiniopTensorDescriptor_t result, infiniopTensorDescriptor_t probs) {
     switch (handle->device) {
@@ -35,8 +38,14 @@ __C infiniopStatus_t infiniopCreateRandomSampleDescriptor(infiniopHandle_t handl
 #ifdef ENABLE_ASCEND_NPU
         case DevAscendNpu: {
             return ascendCreateRandomSampleDescriptor((AscendHandle_t) handle,
-                                                     (RandomSampleAscendDescriptor_t *) desc_ptr, result, probs);
+                                                      (RandomSampleAscendDescriptor_t *) desc_ptr, result, probs);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoCreateRandomSampleDescriptor((TecoHandle_t) handle,
+                                                    (RandomSampleTecoDescriptor_t *) desc_ptr, result, probs);
+            ;
 #endif
     }
     return STATUS_BAD_DEVICE;
@@ -64,6 +73,10 @@ __C infiniopStatus_t infiniopGetRandomSampleWorkspaceSize(infiniopRandomSampleDe
         case DevAscendNpu: {
             return ascendGetRandomSampleWorkspaceSize((RandomSampleAscendDescriptor_t) desc, size);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoGetRandomSampleWorkspaceSize((RandomSampleTecoDescriptor_t) desc, size);
 #endif
     }
     return STATUS_BAD_DEVICE;
@@ -98,6 +111,10 @@ __C infiniopStatus_t infiniopRandomSample(infiniopRandomSampleDescriptor_t desc,
             return ascendRandomSample((RandomSampleAscendDescriptor_t) desc, workspace, workspace_size, result, probs, random_val, topp, topk, temperature, stream);
         }
 #endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoRandomSample((RandomSampleTecoDescriptor_t) desc, workspace, workspace_size, result, probs, random_val, topp, topk, temperature, stream);
+#endif
     }
     return STATUS_BAD_DEVICE;
 }
@@ -121,6 +138,10 @@ __C infiniopStatus_t infiniopDestroyRandomSampleDescriptor(infiniopRandomSampleD
         case DevAscendNpu: {
             return ascendDestroyRandomSampleDescriptor((RandomSampleAscendDescriptor_t) desc);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoDestroyRandomSampleDescriptor((RandomSampleTecoDescriptor_t) desc);
 #endif
     }
     return STATUS_BAD_DEVICE;
