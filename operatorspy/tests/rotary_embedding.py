@@ -225,5 +225,5 @@ if __name__ == "__main__":
         test_ascend(lib, test_cases)
     if args.teco:
         test_teco(lib, test_cases)
-    if not (args.cpu or args.cuda or args.bang or args.ascend):
+    if not (args.cpu or args.cuda or args.bang or args.ascend or args.teco):
         test_cpu(lib, test_cases)
