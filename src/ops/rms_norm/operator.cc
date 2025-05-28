@@ -13,6 +13,7 @@
 #ifdef ENABLE_CAMBRICON_MLU
 #include "../../devices/bang/bang_handle.h"
 #include "bang/rms_norm_bang.h"
+#include "bang/rms_norm_cnnl.h"
 #endif
 #ifdef ENABLE_ASCEND_NPU
 #include "ascend/rms_norm_aclnn.h"
@@ -43,7 +44,8 @@ __C infiniopStatus_t infiniopCreateRMSNormDescriptor(
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangCreateRMSNormDescriptor((BangHandle_t) handle, (RMSNormBangDescriptor_t *) desc_ptr, y_desc, x_desc, w_desc, epsilon);
+            // return bangCreateRMSNormDescriptor((BangHandle_t) handle, (RMSNormBangDescriptor_t *) desc_ptr, y_desc, x_desc, w_desc, epsilon);
+            return cnnlCreateRMSNormDescriptor((BangHandle_t) handle, (RMSNormCnnlDescriptor_t *) desc_ptr, y_desc, x_desc, w_desc, epsilon);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
@@ -84,7 +86,8 @@ __C infiniopStatus_t infiniopGetRMSNormWorkspaceSize(infiniopRMSNormDescriptor_t
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangGetRMSNormWorkspaceSize((RMSNormBangDescriptor_t) desc, size);
+            // return bangGetRMSNormWorkspaceSize((RMSNormBangDescriptor_t) desc, size);
+            return cnnlGetRMSNormWorkspaceSize((RMSNormCnnlDescriptor_t) desc, size);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
@@ -122,7 +125,8 @@ __C infiniopStatus_t infiniopRMSNorm(infiniopRMSNormDescriptor_t desc, void *wor
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangRMSNorm((RMSNormBangDescriptor_t) desc, workspace, workspace_size, y, x, w, stream);
+            // return bangRMSNorm((RMSNormBangDescriptor_t) desc, workspace, workspace_size, y, x, w, stream);
+            return cnnlRMSNorm((RMSNormCnnlDescriptor_t) desc, workspace, workspace_size, y, x, w, stream);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
@@ -164,7 +168,8 @@ __C infiniopStatus_t infiniopDestroyRMSNormDescriptor(infiniopRMSNormDescriptor_
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangDestroyRMSNormDescriptor((RMSNormBangDescriptor_t) desc);
+            // return bangDestroyRMSNormDescriptor((RMSNormBangDescriptor_t) desc);
+            return cnnlDestroyRMSNormDescriptor((RMSNormCnnlDescriptor_t) desc);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
