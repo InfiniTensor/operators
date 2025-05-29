@@ -12,9 +12,11 @@ struct RMSNormCnnlDescriptor {
     int device_id;
     std::shared_ptr<Pool<cnnlHandle_t>> pool;
     DT dtype;
+    DT w_datatype;
     cnnlTensorDescriptor_t yDesc;
     cnnlTensorDescriptor_t xDesc;
     cnnlTensorDescriptor_t wDesc;
+    cnnlTensorDescriptor_t wDesc_ = nullptr;
     cnnlFuseNormDescriptor_t opDesc;
     uint64_t n;
     uint64_t d;

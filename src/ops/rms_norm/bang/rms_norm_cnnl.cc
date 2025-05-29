@@ -21,7 +21,7 @@ infiniopStatus_t cnnlCreateRMSNormDescriptor(BangHandle_t handle,
     }
 
     // Create tensor descriptors
-    cnnlTensorDescriptor_t yDesc, xDesc, wDesc;
+    cnnlTensorDescriptor_t yDesc, xDesc, wDesc, wDesc_;
     cnnlCreateTensorDescriptor(&yDesc);
     cnnlCreateTensorDescriptor(&xDesc);
     cnnlCreateTensorDescriptor(&wDesc);
@@ -31,6 +31,11 @@ infiniopStatus_t cnnlCreateRMSNormDescriptor(BangHandle_t handle,
     setCnnlTensor(xDesc, x_desc);
     setCnnlTensor(wDesc, w_desc);
 
+    if (w_desc->dt == F32) {
+        cnnlCreateTensorDescriptor(&wDesc_);
+        TensorDescriptor w_ = {F16, w_desc->ndim, w_desc->shape, w_desc->strides};
+        setCnnlTensor(wDesc_, &w_);
+    }
     // Create and set RMSNorm descriptor
     cnnlFuseNormDescriptor_t opDesc;
     cnnlCreateFuseNormDescriptor(&opDesc);
@@ -44,9 +49,11 @@ infiniopStatus_t cnnlCreateRMSNormDescriptor(BangHandle_t handle,
         handle->device_id,
         handle->cnnl_handles,
         y_desc->dt,
+        w_desc->dt,
         yDesc,
         xDesc,
         wDesc,
+        wDesc_,
         opDesc,
         n,
         d,
@@ -74,12 +81,30 @@ infiniopStatus_t cnnlRMSNorm(RMSNormCnnlDescriptor_t desc,
         return STATUS_BAD_DEVICE;
     }
 
+    void *work = nullptr;
+    int sum = desc->n * desc->d * 2;
+    cnrtMalloc(&work, sum * 2);
+    use_cnnl(desc->pool, desc->device_id, (cnrtQueue_t)stream, [&](cnnlHandle_t handle) {
+        cnnlCastDataType(handle, desc->wDesc, w, CNNL_CAST_FLOAT_TO_HALF, desc->wDesc_, work);
+        });
+    // if (dtype_eq(desc->w_datatype, F32)) {
+    //     TensorDescriptor w = {F16, desc->wDesc->ndim, desc->wDesc->shape, desc->wDesc->strides};
+    //     cnnlCreateTensorDescriptor(&wDesc_);
+    //     std::vector<int> dims(&w->ndim);
+    //     for (uint64_t i = 0; i < &w->ndim; i++) {
+    //         dims[i] = static_cast<int>(&w->shape[i]);
+    //         sum *= dims[i];
+    //     }
+    //     cnnlSetTensorDescriptor(wDesc_, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
+    //                         dims.size(), dims.data());
+    // }
     use_cnnl(desc->pool, desc->device_id, (cnrtQueue_t)stream,
              [&](cnnlHandle_t handle) {
                  cnnlFuseNorm(handle, 
                              desc->opDesc, 
                              desc->xDesc, x,
-                             desc->wDesc, w,
+                             desc->w_datatype == F32 ? desc->wDesc_ : desc->wDesc, 
+                             desc->w_datatype == F32 ? work : w,
                              nullptr, nullptr,
                              nullptr, nullptr,
                              nullptr, nullptr,
