@@ -8,12 +8,10 @@ struct RearrangeBangDescriptor {
     Device device;
     int device_id;
     DT dtype;
-    uint64_t r;
     uint64_t ndim;
-    uint64_t *mlu_shape;
-    int64_t
-        *mlu_strides_dst,
-        *mlu_strides_src;
+    uint64_t dim_last, dim_2nd_last, dim_3rd_last;
+    int64_t dst_stride_2nd_last, dst_stride_3rd_last,
+        src_stride_2nd_last, src_stride_3rd_last;
 };
 
 typedef struct RearrangeBangDescriptor *RearrangeBangDescriptor_t;

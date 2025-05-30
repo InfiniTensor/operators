@@ -1,73 +1,79 @@
+#include "../../../devices/bang/common_bang.h"
 #include "bang.h"
 #include "bang_device_functions.h"
 #include "cnrt.h"
 #include "rearrange_bang.h"
-#include "../../../devices/bang/common_bang.h"
 #include <stdlib.h>
 
-const int SRC_MAX_SIZE = 1024 * 1024 * 128; 
+const int SRC_MAX_SIZE = 1024 * 1024 * 128;
 
 __mlu_global__ void rearrange(
     char *dst,
     char const *src,
-    uint64_t *mlu_shape,
-    int64_t *mlu_strides_dst,
-    int64_t *mlu_strides_src,
-    int r,
-    int ndim, int byteSize){
-    const int maxNum = SRC_MAX_SIZE/byteSize;
+    uint64_t ndim,
+    uint64_t dim_last, uint64_t dim_2nd_last, uint64_t dim_3rd_last,
+    int64_t dst_stride_2nd_last, int64_t dst_stride_3rd_last,
+    int64_t src_stride_2nd_last, int64_t src_stride_3rd_last,
+    int dtSize) {
+    const int maxNum = SRC_MAX_SIZE / dtSize;
 
-    int remainT = r % taskDim;
-    int stepEasy = (r - remainT) / taskDim;
+    int num_of_layers = dim_3rd_last * dim_2nd_last;
+    int remainT = num_of_layers % taskDim;
+    int stepEasy = (num_of_layers - remainT) / taskDim;
     int stepHard = stepEasy + 1;
     int step = (taskId < remainT ? stepHard : stepEasy);
     int indStart = (taskId < remainT ? taskId * stepHard : remainT * stepHard + (taskId - remainT) * stepEasy);
-    
-    int dimsize = mlu_shape[ndim - 1];
-    if(dimsize < maxNum){
-        for(int i = indStart; i < indStart + step; i++){
+
+    if (dim_last < maxNum) {
+        for (int i = indStart; i < indStart + step; ++i) {
             int tidS = 0;
             int tidD = 0;
             int indi = i;
-            for(int j = ndim - 2; j >= 0; --j){
-                tidS += (indi % mlu_shape[j]) * mlu_strides_src[j];
-                tidD += (indi % mlu_shape[j]) * mlu_strides_dst[j];
-                indi /= mlu_shape[j];
-            }
-            __memcpy(dst + tidD * byteSize, src + tidS * byteSize, dimsize * byteSize, GDRAM2GDRAM);
+
+            tidS += (indi % dim_2nd_last) * src_stride_2nd_last;
+            tidD += (indi % dim_2nd_last) * dst_stride_2nd_last;
+            indi /= dim_2nd_last;
+
+            tidS += (indi % dim_3rd_last) * src_stride_3rd_last;
+            tidD += (indi % dim_3rd_last) * dst_stride_3rd_last;
+            indi /= dim_3rd_last;
+
+            __memcpy(dst + tidD * dtSize, src + tidS * dtSize, dim_last * dtSize, GDRAM2GDRAM);
         }
-       
+
+    } else {
+        int remain = dim_last % maxNum;
+        int repeat = (dim_last - remain) / maxNum;
+        for (int i = indStart; i < indStart + step; ++i) {
+            int tidS = 0;
+            int tidD = 0;
+            int indi = i;
+
+            tidS += (indi % dim_2nd_last) * src_stride_2nd_last;
+            tidD += (indi % dim_2nd_last) * dst_stride_2nd_last;
+            indi /= dim_2nd_last;
+
+            tidS += (indi % dim_3rd_last) * src_stride_3rd_last;
+            tidD += (indi % dim_3rd_last) * dst_stride_3rd_last;
+            indi /= dim_3rd_last;
+
+            for (int index = 0; index < repeat; index++) {
+                __memcpy(dst + (tidD + index * maxNum) * dtSize, src + (tidS + index * maxNum) * dtSize, maxNum * dtSize, GDRAM2GDRAM);
+            }
+            if (remain) {
+                __memcpy(dst + (tidD + repeat * maxNum) * dtSize, src + (tidS + repeat * maxNum) * dtSize, remain * dtSize, GDRAM2GDRAM);
+            }
+        }
     }
-    else{
-        int remain = dimsize % maxNum;
-        int repeat = (dimsize - remain) / maxNum;
-        for(int i = indStart; i < indStart + step; i++){
-            int tidS = 0;
-            int tidD = 0;
-            int indi = i;
-            for(int j = ndim - 2; j >= 0; --j){
-                tidS += (indi % mlu_shape[j]) * mlu_strides_src[j];
-                tidD += (indi % mlu_shape[j]) * mlu_strides_dst[j];
-                indi /= mlu_shape[j];
-            }
-            for(int index = 0; index < repeat; index++){
-                __memcpy(dst + (tidD + index * maxNum) * byteSize, src + (tidS + index * maxNum) * byteSize, maxNum * byteSize, GDRAM2GDRAM);
-            }
-            if(remain){
-                __memcpy(dst + (tidD + repeat * maxNum) * byteSize, src + (tidS + repeat * maxNum) * byteSize, remain * byteSize, GDRAM2GDRAM);
-            }
-        }
-        
-    }   
 }
 
 void rearrangeUnion(cnrtQueue_t queue, void *destination, void const *source,
-    uint64_t *mlu_shape,
-    int64_t *mlu_strides_dst,
-    int64_t *mlu_strides_src,
-    int r,
-    int ndim, int byteSize) {
-    auto dst = reinterpret_cast< char *>(destination);
+                    uint64_t ndim,
+                    uint64_t dim_last, uint64_t dim_2nd_last, uint64_t dim_3rd_last,
+                    int64_t dst_stride_2nd_last, int64_t dst_stride_3rd_last,
+                    int64_t src_stride_2nd_last, int64_t src_stride_3rd_last,
+                    int dtSize) {
+    auto dst = reinterpret_cast<char *>(destination);
     auto src = reinterpret_cast<const char *>(source);
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
@@ -77,25 +83,31 @@ void rearrangeUnion(cnrtQueue_t queue, void *destination, void const *source,
     k_dim.z = 1;
     k_type = CNRT_FUNC_TYPE_UNION1;
 
-    rearrange<<<k_dim, k_type, queue>>>(dst, src, mlu_shape, mlu_strides_dst, mlu_strides_src, r, ndim, byteSize);
-    
+    rearrange<<<k_dim, k_type, queue>>>(dst, src, ndim,
+                                        dim_last, dim_2nd_last, dim_3rd_last,
+                                        dst_stride_2nd_last, dst_stride_3rd_last,
+                                        src_stride_2nd_last, src_stride_3rd_last,
+                                        dtSize);
+
     cnrtQueueSync(queue);
 }
 
 void rearrange_bang(RearrangeBangDescriptor_t desc, void *dst,
-                               void const *src,
-                               void *stream) {
+                    void const *src,
+                    void *stream) {
     auto queue = reinterpret_cast<cnrtQueue_t>(stream);
-    int r = desc->r;
-    int ndim = desc->ndim;
-    int byteSize = desc->dtype.size;
-    rearrangeUnion(queue, dst, src, desc->mlu_shape, desc->mlu_strides_dst, desc->mlu_strides_src, r, ndim, byteSize);
+    rearrangeUnion(queue, dst, src, desc->ndim,
+                   desc->dim_last, desc->dim_2nd_last, desc->dim_3rd_last,
+                   desc->dst_stride_2nd_last, desc->dst_stride_3rd_last,
+                   desc->src_stride_2nd_last, desc->src_stride_3rd_last,
+                   desc->dtype.size);
 }
+
 infiniopStatus_t bangRearrange(RearrangeBangDescriptor_t desc,
                                void *dst,
                                void const *src,
                                void *stream) {
-                              
+
     if (cnrtSetDevice(desc->device_id) != cnrtSuccess) {
         return STATUS_BAD_DEVICE;
     }
