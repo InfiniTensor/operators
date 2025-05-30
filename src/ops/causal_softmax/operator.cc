@@ -43,8 +43,8 @@ __C infiniopStatus_t infiniopCreateCausalSoftmaxDescriptor(
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangCreateCausalSoftmaxDescriptor((BangHandle_t) handle, (CausalSoftmaxBangDescriptor_t *) desc_ptr, y_desc);
-            // return cnnlCreateCausalSoftmaxDescriptor((BangHandle_t) handle, (CausalSoftmaxCnnlDescriptor_t *) desc_ptr, y_desc);
+            // return bangCreateCausalSoftmaxDescriptor((BangHandle_t) handle, (CausalSoftmaxBangDescriptor_t *) desc_ptr, y_desc);
+            return cnnlCreateCausalSoftmaxDescriptor((BangHandle_t) handle, (CausalSoftmaxCnnlDescriptor_t *) desc_ptr, y_desc);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
@@ -80,8 +80,8 @@ __C infiniopStatus_t infiniopGetCausalSoftmaxWorkspaceSize(infiniopCausalSoftmax
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangGetCausalSoftmaxWorkspaceSize((CausalSoftmaxBangDescriptor_t) desc, size);
-            // return cnnlGetCausalSoftmaxWorkspaceSize((CausalSoftmaxCnnlDescriptor_t) desc, size);
+            // return bangGetCausalSoftmaxWorkspaceSize((CausalSoftmaxBangDescriptor_t) desc, size);
+            return cnnlGetCausalSoftmaxWorkspaceSize((CausalSoftmaxCnnlDescriptor_t) desc, size);
         }
 
 #endif
@@ -118,8 +118,8 @@ __C infiniopStatus_t infiniopCausalSoftmax(infiniopCausalSoftmaxDescriptor_t des
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangCausalSoftmax((CausalSoftmaxBangDescriptor_t) desc, workspace, workspace_size, data, stream);
-            // return cnnlCausalSoftmax((CausalSoftmaxCnnlDescriptor_t) desc, workspace, workspace_size, data, stream);
+            // return bangCausalSoftmax((CausalSoftmaxBangDescriptor_t) desc, workspace, workspace_size, data, stream);
+            return cnnlCausalSoftmax((CausalSoftmaxCnnlDescriptor_t) desc, workspace, workspace_size, data, stream);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
@@ -155,8 +155,8 @@ __C infiniopStatus_t infiniopDestroyCausalSoftmaxDescriptor(infiniopCausalSoftma
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
         case DevCambriconMlu: {
-            return bangDestroyCausalSoftmaxDescriptor((CausalSoftmaxBangDescriptor_t) desc);
-            // return cnnlDestroyCausalSoftmaxDescriptor((CausalSoftmaxCnnlDescriptor_t) desc);
+            // return bangDestroyCausalSoftmaxDescriptor((CausalSoftmaxBangDescriptor_t) desc);
+            return cnnlDestroyCausalSoftmaxDescriptor((CausalSoftmaxCnnlDescriptor_t) desc);
         }
 #endif
 #ifdef ENABLE_ASCEND_NPU
