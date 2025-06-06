@@ -1,294 +1,303 @@
+#include "../../../devices/bang/common_bang.h"
 #include "bang.h"
 #include "cnrt.h"
 #include "rms_norm_bang.h"
-#include "../../../devices/bang/common_bang.h"
+__mlu_func__ void sumInternal(float *dst, float *src, int max_batch) {
+    constexpr int batch_size = 128 / sizeof(float);
+    __bang_sumpool(
+        dst, src,
+        batch_size,            // channel size
+        1,                     // height
+        max_batch / batch_size,// width
+        1,                     // kernel_height
+        max_batch / batch_size,// kernel_width
+        1,                     // stride_height
+        1                      // stride_width
+    );
+    __bang_reduce_sum(dst, dst, batch_size);
+}
 
-
-const int SRC_MAX_SIZE = 1024 * 64;//尽量取大一些
-__nram__  char nram_buffer[NRAM_MAX_SIZE];
 template<typename T>
-__mlu_global__ void rms_norm(T *destination, T const *source, float const *weight, int stride_y, int stride_x, float eps, int othersize, int dimsize, int dimS){
-    const int maxNum = SRC_MAX_SIZE/sizeof(float);
-    int wSize = 128 / sizeof(T);
-
-    int remainT = othersize % taskDim;
-    int stepEasy = (othersize - remainT) / taskDim;
-    int stepHard = stepEasy + 1;
-    int step = (taskId < remainT ? stepHard : stepEasy);
-    int indStart = (taskId < remainT ? taskId * stepHard : (taskId - remainT) * stepEasy + remainT * stepHard);
-
-    if(dimsize >= maxNum){
-
-        char *nram_buffer1 = nram_buffer + (2 * maxNum + 3 * wSize) * sizeof(T);
-        T *src = (T *)nram_buffer;//[maxNum]
-        T *wet = src + maxNum;//[maxNum]
-        T *destSumFinal = wet + maxNum;//[wSize]
-        T *destSum = destSumFinal + wSize;//[wSize]
-        T *srcTmp = destSum + wSize;//[wSize]
-        __bang_write_zero(srcTmp, wSize);
-        float *wetTmp = (float *)nram_buffer1;
-
-        int remain = dimsize % maxNum;
-        int repeat = (dimsize - remain) / maxNum;
-        int segNum = maxNum / wSize;//准备数值求和
-
-        for(int i = indStart; i < indStart + step; i++){
-            int inds = 0;
-            int indd = 0;
-            int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
-            __bang_write_zero(destSumFinal, wSize);
-            __bang_write_zero(destSum, wSize);
-            for(int s = 0; s < repeat; s++){
-                __memcpy(src, source + inds + s * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, src, maxNum);//src = src * src
-
-                if(maxNum >= wSize){
-                    for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                        for(int j = 0; j < strip; j++){
-                            __bang_add(src + j * wSize, src + j * wSize, src + (j + strip) * wSize, wSize);
-                        }
-                    }
-                    __bang_reduce_sum(destSum, src, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-                else{
-                    __memcpy(srcTmp, src, maxNum * sizeof(T), NRAM2NRAM);
-                    __bang_reduce_sum(destSum, srcTmp, wSize);
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-            }
-            if(remain){
-                __bang_write_zero(src, maxNum);
-                __bang_write_zero(destSum, wSize);
-                __memcpy(src, source + inds + repeat * maxNum, remain * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, src, maxNum);//src = src * src
-                if(maxNum >= wSize){
-                    for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                        for(int j = 0; j < strip; j++){
-                            __bang_add(src + j * wSize, src + j * wSize, src + (j + strip) * wSize, wSize);
-                        }
-                    }
-                    __bang_reduce_sum(destSum, src, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-                else{
-                    __memcpy(srcTmp, src, remain * sizeof(T), NRAM2NRAM);
-                    __bang_reduce_sum(destSum, srcTmp, wSize);
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-            }
-            destSumFinal[0] /= dimsize;
-            destSumFinal[0] += eps;
-            destSumFinal[0] = pow(destSumFinal[0], 0.5);
-            T globalSumInv = 1.0 / destSumFinal[0];
-            for(int s = 0; s < repeat; s++){
-                __memcpy(src, source + inds + s * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
-                __memcpy(wetTmp, weight + s * maxNum, maxNum * sizeof(float), GDRAM2NRAM);
-                __bang_float2half_dn(wet, wetTmp, maxNum);
-                __bang_mul(src, src, wet, maxNum);//src = src * wet
-                __bang_mul_scalar(src, src, globalSumInv, maxNum);
-                __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
-            }
-            if(remain){
-                __memcpy(src, source + inds + repeat * maxNum, remain * sizeof(T), GDRAM2NRAM);
-                __memcpy(wetTmp, weight + repeat * maxNum, remain * sizeof(float), GDRAM2NRAM);
-                __bang_float2half_dn(wet, wetTmp, maxNum);
-                __bang_mul(src, src, wet, maxNum);//src = src * wet
-                __bang_mul_scalar(src, src, globalSumInv, maxNum);
-                __memcpy(destination + indd + repeat * maxNum, src, remain * sizeof(T), NRAM2GDRAM);
-            }
-        }
+__mlu_func__ void sumTyped(float *result, T *data, size_t len) {
+    if constexpr (std::is_same_v<T, half>) {
+        __bang_half2float((float *) data, data + len, len);
+        sumInternal(result, (float *) data, len);
+    } else if constexpr (std::is_same_v<T, bfloat16_t>) {
+        __bang_bfloat162float((float *) data, data + len, len);
+        sumInternal(result, (float *) data, len);
+    } else {
+        sumInternal(result, data, len);
     }
-    else{
-        char *nram_buffer1 = nram_buffer + (2 * dimsize + 2 * wSize + dimS) * sizeof(T);
-        T *src = (T *)nram_buffer;//[dimsize]
-        T *wet = src + dimsize;//[dimsize]
-        T *destSumFinal = wet + dimsize;//[wSize]
-        T *destSum = destSumFinal + wSize;//[dimS]
-        T *srcTmp = destSum + dimS;
-        __bang_write_zero(srcTmp, wSize);
-        float *wetTmp = (float *)nram_buffer1;
+}
 
+__mlu_func__ void maxInternal(float *dst, float *src, int max_batch) {
+    constexpr int batch_size = 128 / sizeof(float);
+    __bang_maxpool(
+        dst, src,
+        batch_size,            // channel size
+        1,                     // height
+        max_batch / batch_size,// width
+        1,                     // kernel_height
+        max_batch / batch_size,// kernel_width
+        1,                     // stride_height
+        1                      // stride_width
+    );
+    __bang_argmax(dst, dst, batch_size);
+}
 
-        int segNum = dimS / wSize;
-
-        for(int i = indStart; i < indStart + step; i++){
-            __bang_write_zero(destSum, dimS);
-            __bang_write_zero(destSumFinal, wSize);
-            int inds = 0;
-            int indd = 0;
-            int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
-            __memcpy(src, source + inds, dimsize * sizeof(T), GDRAM2NRAM);
-            __bang_mul(destSum, src, src, dimsize);//src = src * src
-            if(dimS >= wSize){
-                for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                    for(int j = 0; j < strip; j++){
-                        __bang_add(destSum + j * wSize, destSum + j * wSize, destSum + (j + strip) * wSize, wSize);
-                    }
-                }
-                __bang_reduce_sum(destSumFinal, destSum, wSize);
-            }
-            else{
-                __memcpy(srcTmp, destSum, dimsize * sizeof(T), NRAM2NRAM);
-                __bang_reduce_sum(destSumFinal, srcTmp, wSize);
-            }
-            destSumFinal[0] /= dimsize;
-            destSumFinal[0] += eps;
-            destSumFinal[0] = pow(destSumFinal[0], 0.5);
-            T globalSumInv = 1.0 / destSumFinal[0];
-            __memcpy(wetTmp, weight, dimsize * sizeof(float), GDRAM2NRAM);
-            __bang_float2half_dn(wet, wetTmp, dimsize);
-            __bang_mul(src, src, wet, dimsize);//src = src * wet
-            __bang_mul_scalar(src, src, globalSumInv, dimsize);
-            __memcpy(destination + indd, src, dimsize * sizeof(T), NRAM2GDRAM);
-        }
+template<typename T>
+__mlu_func__ void maxTyped(float *result, T *data, size_t len) {
+    if constexpr (std::is_same_v<T, half>) {
+        __bang_half2float((float *) data, data, len);
+        maxInternal(result, (float *) data, len);
+    } else if constexpr (std::is_same_v<T, bfloat16_t>) {
+        __bang_bfloat162float((float *) data, data, len);
+        maxInternal(result, (float *) data, len);
+    } else {
+        maxInternal(result, data, len);
     }
 }
 
 template<typename T>
-__mlu_global__ void rms_norm(T *destination, T const *source, T const *weight, int stride_y, int stride_x, float eps, int othersize, int dimsize, int dimS){
-    const int maxNum = SRC_MAX_SIZE/sizeof(T);
-    int wSize = 128 / sizeof(T);
+__mlu_func__ float sum(const T *source, T *src, float *dst, int num_elements, int max_batch) {
+    float res = 0.0f;
+    int offset = (sizeof(T) == 2 ? max_batch : 0);
 
-    int remainT = othersize % taskDim;
-    int stepEasy = (othersize - remainT) / taskDim;
-    int stepHard = stepEasy + 1;
-    int step = (taskId < remainT ? stepHard : stepEasy);
-    int indStart = (taskId < remainT ? taskId * stepHard : (taskId - remainT) * stepEasy + remainT * stepHard);
+    size_t processed = 0;
+    while (processed < num_elements) {
+        size_t curr_batch = std::min<size_t>(max_batch, num_elements - processed);
 
-    if(dimsize >= maxNum){
-
-        T *src = (T *)nram_buffer;//[maxNum]
-        T *wet = src + maxNum;//[maxNum]
-        T *destSumFinal = wet + maxNum;//[wSize]
-        T *destSum = destSumFinal + wSize;//[wSize]
-        T *srcTmp = destSum + wSize;//[wSize]
-        __bang_write_zero(srcTmp, wSize);
-
-        int remain = dimsize % maxNum;
-        int repeat = (dimsize - remain) / maxNum;
-        int segNum = maxNum / wSize;//准备数值求和
-
-        for(int i = indStart; i < indStart + step; i++){
-            int inds = 0;
-            int indd = 0;
-            int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
-            __bang_write_zero(destSumFinal, wSize);
-            __bang_write_zero(destSum, wSize);
-            for(int s = 0; s < repeat; s++){
-                __memcpy(src, source + inds + s * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, src, maxNum);//src = src * src
-
-                if(maxNum >= wSize){
-                    for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                        for(int j = 0; j < strip; j++){
-                            __bang_add(src + j * wSize, src + j * wSize, src + (j + strip) * wSize, wSize);
-                        }
-                    }
-                    __bang_reduce_sum(destSum, src, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-                else{
-                    __memcpy(srcTmp, src, maxNum * sizeof(T), NRAM2NRAM);
-                    __bang_reduce_sum(destSum, srcTmp, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-            }
-            if(remain){
-                __bang_write_zero(src, maxNum);
-                __bang_write_zero(destSum, wSize);
-                __memcpy(src, source + inds + repeat * maxNum, remain * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, src, maxNum);//src = src * src
-                if(maxNum >= wSize){
-                    for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                        for(int j = 0; j < strip; j++){
-                            __bang_add(src + j * wSize, src + j * wSize, src + (j + strip) * wSize, wSize);
-                        }
-                    }
-                    __bang_reduce_sum(destSum, src, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-                else{
-                    __memcpy(srcTmp, src, remain * sizeof(T), NRAM2NRAM);
-                    __bang_reduce_sum(destSum, srcTmp, wSize);//此时destSum[0]保存的就是当前maxNum长度数据的数值和
-                    __bang_add(destSumFinal, destSumFinal, destSum, wSize);
-                }
-            }
-            destSumFinal[0] /= dimsize;
-            destSumFinal[0] += eps;
-            destSumFinal[0] = pow(destSumFinal[0], 0.5);
-            T globalSumInv = 1.0 / destSumFinal[0];
-            for(int s = 0; s < repeat; s++){
-                __memcpy(src, source + inds + s * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
-                __memcpy(wet, weight + s * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, wet, maxNum);//src = src * wet
-                __bang_mul_scalar(src, src, globalSumInv, maxNum);
-                __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
-            }
-            if(remain){
-                __memcpy(src, source + inds + repeat * maxNum, remain * sizeof(T), GDRAM2NRAM);
-                __memcpy(wet, weight + repeat * maxNum, remain * sizeof(T), GDRAM2NRAM);
-                __bang_mul(src, src, wet, maxNum);//src = src * wet
-                __bang_mul_scalar(src, src, globalSumInv, maxNum);
-                __memcpy(destination + indd + repeat * maxNum, src, remain * sizeof(T), NRAM2GDRAM);
-            }
+        if (curr_batch < max_batch) {
+            __bang_write_zero(src, max_batch + offset);
         }
+
+        __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
+        sumTyped(dst, src, max_batch);
+        res += dst[0];
+        processed += curr_batch;
     }
-    else{
 
-        T *src = (T *)nram_buffer;//[dimsize]
-        T *wet = src + dimsize;//[dimsize]
-        T *destSumFinal = wet + dimsize;//[wSize]
-        T *destSum = destSumFinal + wSize;//[dimS]
-        T *srcTmp = destSum + dimS;//[wSize]
+    return res;
+}
 
+template<typename T>
+__mlu_func__ float sumSquared(const T *source, T *src, float *dst, int num_elements, int max_batch) {
+    float res = 0.0f;
+    int offset = (sizeof(T) == 2 ? max_batch : 0);
 
-        int segNum = dimS / wSize;
+    size_t processed = 0;
+    while (processed < num_elements) {
+        size_t curr_batch = std::min<size_t>(max_batch, num_elements - processed);
 
-        for(int i = indStart; i < indStart + step; i++){
-            __bang_write_zero(destSum, dimS);
-            __bang_write_zero(destSumFinal, wSize);
-            int inds = 0;
-            int indd = 0;
-            int indi = i;
-            inds += (indi % othersize) * stride_x;
-            indd += (indi % othersize) * stride_y;
-            __memcpy(src, source + inds, dimsize * sizeof(T), GDRAM2NRAM);
-            __bang_mul(destSum, src, src, dimsize);//src = src * src
-            if(dimS >= wSize){
-                for(int strip = segNum / 2; strip > 0; strip = strip / 2){
-                    for(int j = 0; j < strip; j++){
-                        __bang_add(destSum + j * wSize, destSum + j * wSize, destSum + (j + strip) * wSize, wSize);
-                    }
-                }
-                __bang_reduce_sum(destSumFinal, destSum, wSize);
-            }
-            else{
-                __memcpy(srcTmp, destSum, dimsize * sizeof(T), NRAM2NRAM);
-                __bang_reduce_sum(destSumFinal, srcTmp, wSize);
-
-            }
-            destSumFinal[0] /= dimsize;
-            destSumFinal[0] += eps;
-            destSumFinal[0] = pow(destSumFinal[0], 0.5);
-            T globalSumInv = 1.0 / destSumFinal[0];
-            __memcpy(wet, weight, dimsize * sizeof(T), GDRAM2NRAM);
-            __bang_mul(src, src, wet, dimsize);//src = src * wet
-            __bang_mul_scalar(src, src, globalSumInv, dimsize);
-            __memcpy(destination + indd, src, dimsize * sizeof(T), NRAM2GDRAM);
+        if (curr_batch < max_batch) {
+            __bang_write_zero(src, max_batch + offset);
         }
+
+        __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
+
+        // Find max absolute value
+        float max_val = 0.0f;
+        for (size_t i = 0; i < curr_batch; ++i) {
+            float val = fabs(__half2float(src[offset + i]));
+            max_val = std::max(val, max_val);
+        }
+
+        float scale = (max_val > 1e3f) ? 1e3f / max_val : 1.0f;// Prevent overflow
+        float sum = 0.0f;
+
+        // Scaled computation
+        for (size_t i = 0; i < curr_batch; ++i) {
+            float val = __half2float(src[offset + i]) * scale;
+            sum += val * val;
+        }
+
+        res += sum / (scale * scale);
+        processed += curr_batch;
+    }
+
+    return res;
+}
+
+template<typename T>
+__mlu_func__ float sumSquaredBatched(const T *source, T *src, float *dst, int num_elements, int max_batch) {
+    constexpr int min_vector_size = 32;// Minimum vector size threshold
+    constexpr int batch_size = 128 / sizeof(float);
+
+    // For small vectors, use safer element-wise computation
+    if (num_elements < min_vector_size) {
+        return sumSquared(source, src, dst, num_elements, max_batch);
+    }
+
+    float res = 0.0f;
+    int offset = (sizeof(T) == 2 ? max_batch : 0);
+
+    size_t processed = 0;
+    while (processed < num_elements) {
+        size_t curr_batch = std::min<size_t>(max_batch, num_elements - processed);
+        size_t aligned_batch = (curr_batch / batch_size) * batch_size;
+        size_t remainder = curr_batch % batch_size;
+
+        // Ensure NRAM buffer is zeroed
+        __bang_write_zero(src, max_batch + offset);
+
+        // Copy data to NRAM
+        __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
+
+        if constexpr (std::is_same_v<T, float>) {
+            // float32 processing path
+            if (aligned_batch > 0) {
+                __bang_mul((float *) (src + offset), (float *) (src + offset),
+                           (float *) (src + offset), aligned_batch);
+                sumInternal(dst, (float *) (src + offset), aligned_batch);
+                res += dst[0];
+            }
+
+            // Process unaligned tail
+            if (remainder > 0) {
+                for (size_t i = aligned_batch; i < curr_batch; ++i) {
+                    float val = ((float *) (src + offset))[i];
+                    res += val * val;
+                }
+            }
+        } else {
+            // half/bfloat16 processing path
+            if constexpr (std::is_same_v<T, half>) {
+                __bang_half2float((float *) (src + offset), src + offset, curr_batch);
+            } else {
+                __bang_bfloat162float((float *) (src + offset), src + offset, curr_batch);
+            }
+
+            // Find maximum absolute value using max operations
+            float max_val = 0.0f;
+            if (aligned_batch > 0) {
+                __bang_abs((float *) (src + offset), (float *) (src + offset), aligned_batch);
+                maxInternal(dst, (float *) (src + offset), aligned_batch);
+                max_val = dst[0];
+            }
+
+            // Check for max value in tail elements
+            if (remainder > 0) {
+                for (size_t i = aligned_batch; i < curr_batch; ++i) {
+                    float val = fabs(((float *) (src + offset))[i]);
+                    max_val = std::max(max_val, val);
+                }
+            }
+
+            // Scale and compute squared sum
+            float scale = (max_val > 1e3f) ? 1e3f / max_val : 1.0f;
+
+            // Process aligned portion
+            if (aligned_batch > 0) {
+                __bang_mul_scalar((float *) (src + offset), (float *) (src + offset), scale, aligned_batch);
+                __bang_mul((float *) (src + offset), (float *) (src + offset),
+                           (float *) (src + offset), aligned_batch);
+                sumInternal(dst, (float *) (src + offset), aligned_batch);
+                res += dst[0] / (scale * scale);
+            }
+
+            // Process unaligned tail
+            if (remainder > 0) {
+                for (size_t i = aligned_batch; i < curr_batch; ++i) {
+                    float val = ((float *) (src + offset))[i] * scale;
+                    res += val * val / (scale * scale);
+                }
+            }
+        }
+
+        processed += curr_batch;
+    }
+
+    return res;
+}
+
+__nram__ char nram_buffer[NRAM_MAX_SIZE];
+
+const int SRC_MAX_SIZE = 1024 * 32;
+
+template<typename T, typename Tw>
+__mlu_global__ void rmsnorm(T *output, const T *input, const Tw *weight,
+                            int *shape, int *output_strides, int *input_strides,
+                            float epsilon, int num_dims, int norm_dim_size) {
+    // 计算问题维度
+    int batch_volume = 1;
+    for (int dim_idx = 0; dim_idx < num_dims - 1; ++dim_idx) {
+        batch_volume *= shape[dim_idx];
+    }
+    int vector_size = shape[num_dims - 1];
+
+    // 确定NRAM操作的最大批次大小
+    int max_batch_size = (vector_size >= SRC_MAX_SIZE / sizeof(Tw) ? SRC_MAX_SIZE / sizeof(Tw) : norm_dim_size);
+    constexpr int reduce_buffer_size = 128 / sizeof(float);
+
+    // 核心间任务分配
+    int remaining_tasks = batch_volume % taskDim;
+    int base_tasks_per_core = batch_volume / taskDim;
+    int actual_tasks = base_tasks_per_core + (taskId < remaining_tasks ? 1 : 0);
+    int task_start_idx = (taskId < remaining_tasks ? taskId * base_tasks_per_core + taskId : taskId * base_tasks_per_core + remaining_tasks);
+
+    // NRAM缓冲区分配
+    int half_type_offset = (sizeof(T) == 2 ? max_batch_size : 0);
+    char *input_buffer = nram_buffer + reduce_buffer_size * sizeof(float);
+    char *weight_buffer = input_buffer + (max_batch_size + half_type_offset) * sizeof(T);
+
+    float *reduction_result = (float *) nram_buffer;
+    T *input_cache = (T *) input_buffer;
+    Tw *weight_cache = (Tw *) weight_buffer;
+
+    // 处理分配给当前核心的向量
+    int processed_tasks = 0;
+    while (processed_tasks < actual_tasks) {
+        int input_offset = 0;
+        int output_offset = 0;
+        int current_index = task_start_idx + processed_tasks;
+
+        for (int dim = num_dims - 2; dim >= 0; --dim) {
+            input_offset += (current_index % shape[dim]) * input_strides[dim];
+            output_offset += (current_index % shape[dim]) * output_strides[dim];
+            current_index = current_index / shape[dim];
+        }
+
+        // 计算平方和
+        __bang_write_zero(reduction_result, reduce_buffer_size);
+        float sum_squared = sumSquaredBatched<T>(
+            input + input_offset, input_cache, reduction_result, vector_size, max_batch_size);
+        // 计算归一化因子
+        float rms_value = sum_squared / vector_size;
+        rms_value += epsilon;
+        rms_value = sqrtf(rms_value);
+        float inv_rms = 1.0f / rms_value;
+
+        // 分块处理向量
+        size_t processed_elements = 0;
+        while (processed_elements < vector_size) {
+            size_t current_batch = std::min((size_t) max_batch_size, vector_size - processed_elements);
+
+            // 加载数据
+            __memcpy(input_cache, input + input_offset + processed_elements, current_batch * sizeof(T), GDRAM2NRAM);
+            __memcpy(weight_cache, weight + processed_elements, current_batch * sizeof(Tw), GDRAM2NRAM);
+
+            // 类型转换(若需要)
+            if constexpr (std::is_same<T, half>::value && std::is_same<Tw, float>::value) {
+                __bang_float2half_dn((T *) weight_cache, weight_cache, current_batch);
+            }
+
+            // 归一化和缩放
+            __bang_mul(input_cache, input_cache, (T *) weight_cache, current_batch);
+            __bang_mul_scalar(input_cache, input_cache, inv_rms, current_batch);
+
+            // 存储结果
+            __memcpy(output + output_offset + processed_elements, input_cache, current_batch * sizeof(T), NRAM2GDRAM);
+
+            processed_elements += current_batch;
+        }
+
+        processed_tasks++;
     }
 }
 
 
 template<typename T, typename Tw>
-void rms_normUnion(cnrtQueue_t queue, T *y, T const *x, Tw const *w, int stride_y, int stride_x, float epsilon, int n, int d){
+void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int *shape, int *stride_y, int *stride_x, float eps, int ndim) {
     cnrtDim3_t k_dim;
     cnrtFunctionType_t k_type;
 
@@ -296,19 +305,39 @@ void rms_normUnion(cnrtQueue_t queue, T *y, T const *x, Tw const *w, int stride_
     k_dim.y = 1;
     k_dim.z = 1;
     k_type = CNRT_FUNC_TYPE_UNION1;
+    int dimsize = shape[ndim - 1];
     int dimS;
-    float mi = log2(d);
+    float mi = log2(dimsize);
     if (floor(mi) == mi) {
-        dimS = d;
+        dimS = dimsize;
     } else {
         dimS = pow(2, floor(mi) + 1);
     }
-    rms_norm<T><<<k_dim, k_type, queue>>>(y, x, w, stride_y, stride_x, epsilon, n, d, dimS);
-    cnrtQueueSync(queue);
+    int wSize = 128 / sizeof(T);
+    if (dimS < wSize) {
+        dimS = wSize;
+    }
 
+    auto y_ = reinterpret_cast<T *>(y);
+    auto x_ = reinterpret_cast<T const *>(x);
+    auto w_ = reinterpret_cast<Tw const *>(w);
+    char *tmpDevice;
+    CNRT_CHECK(cnrtMalloc((void **) &tmpDevice, 3 * ndim * sizeof(int)));
+    char *tmpStride = tmpDevice + ndim * sizeof(int);
+    int *mlu_shape = (int *) tmpDevice;
+    int *mlu_stride_x = (int *) tmpStride;
+    int *mlu_stride_y = mlu_stride_x + ndim;
+    CNRT_CHECK(cnrtMemcpy(mlu_shape, shape, ndim * sizeof(int), cnrtMemcpyHostToDev));
+    CNRT_CHECK(cnrtMemcpy(mlu_stride_x, stride_x, ndim * sizeof(int), cnrtMemcpyHostToDev));
+    CNRT_CHECK(cnrtMemcpy(mlu_stride_y, stride_y, ndim * sizeof(int), cnrtMemcpyHostToDev));
+
+    rmsnorm<T, Tw><<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
+
+    cnrtQueueSync(queue);
+    cnrtFree(tmpDevice);
 }
 void rms_norm_bang_f16(RMSNormBangDescriptor_t desc, void *y, void const *x, void const *w,
-                             void *stream){
+                       void *stream) {
     auto queue = reinterpret_cast<cnrtQueue_t>(stream);
     int n = static_cast<int>(desc->n);
     int d = static_cast<int>(desc->d);
@@ -317,28 +346,36 @@ void rms_norm_bang_f16(RMSNormBangDescriptor_t desc, void *y, void const *x, voi
     auto epsilon = desc->epsilon;//float
 
     // Get strides in terms of elements
-    int stride_y = static_cast<int>(desc->stride_y);
-    int stride_x = static_cast<int>(desc->stride_x);
+    int ndim = 2;
+    char *tmp = (char *) malloc(3 * ndim * sizeof(int));
+    int *shape = (int *) tmp;
+    int *stride_y = shape + ndim;
+    int *stride_x = stride_y + ndim;
+    shape[0] = n;
+    shape[1] = d;
+    stride_y[0] = static_cast<int>(desc->stride_y);
+    stride_x[0] = static_cast<int>(desc->stride_x);
+    stride_y[1] = 1;
+    stride_x[1] = 1;
     auto w_datatype = desc->w_datatype;
     if (dtype_eq(w_datatype, F16)) {
         auto w_ = reinterpret_cast<half const *>(w);
-        rms_normUnion<half, half>(queue, y_, x_, w_, stride_y, stride_x, epsilon, n, d);
-    }
-    else{
+        RMSNormUnion<half, half>(queue, y_, x_, w_, shape, stride_y, stride_x, epsilon, ndim);
+    } else {
         auto w_ = reinterpret_cast<float const *>(w);
-        rms_normUnion<half, float>(queue, y_, x_, w_, stride_y, stride_x, epsilon, n, d);
+        RMSNormUnion<half, float>(queue, y_, x_, w_, shape, stride_y, stride_x, epsilon, ndim);
     }
-
+    free(tmp);
 }
 infiniopStatus_t bangRMSNorm(RMSNormBangDescriptor_t desc,
                              void *workspace,
                              uint64_t workspace_size,
                              void *y, void const *x, void const *w,
-                             void *stream){
+                             void *stream) {
     if (cnrtSetDevice(desc->device_id) != cnrtSuccess) {
         return STATUS_BAD_DEVICE;
     }
-    if (dtype_eq(desc->dtype, F16)){
+    if (dtype_eq(desc->dtype, F16)) {
         rms_norm_bang_f16(desc, y, x, w, stream);
         return STATUS_SUCCESS;
     }
