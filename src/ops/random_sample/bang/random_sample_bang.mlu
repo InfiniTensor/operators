@@ -32,8 +32,8 @@ __mlu_global__ void random_sampleX(T const *source, uint64_t *indices, uint64_t 
     T *destSumFinal = destSum + maxNum;//[wSize]
     T *srcGlobal = destSumFinal + wSize;//[taskDim * topk]
     __bang_write_value(src, maxNum, -INFINITY);
-    __bang_write_zero(destSum, maxNum);
-    __bang_write_zero(destSumFinal, wSize);
+    __bang_write_value(destSum, maxNum, 0);
+    __bang_write_value(destSumFinal, wSize, 0);
 
     
 
@@ -88,8 +88,8 @@ __mlu_global__ void random_sampleX(T const *source, uint64_t *indices, uint64_t 
     }
     __sync_all();
     T globalM = globalTopk[0];
-    __bang_write_zero(destSum, maxNum);
-    __bang_write_zero(destSumFinal, wSize);
+    __bang_write_value(destSum, maxNum, 0);
+    __bang_write_value(destSumFinal, wSize, 0);
     if(step){
         __bang_write_value(src, maxNum, globalM);
         __memcpy(src, source + indStart, step * sizeof(T), GDRAM2NRAM);
@@ -131,7 +131,7 @@ __mlu_global__ void random_sampleX(T const *source, uint64_t *indices, uint64_t 
         __bang_active_exp_less_0(srcGlobal, srcGlobal, topk);
         __bang_mul_scalar(srcGlobal, srcGlobal, globalSumInv, topk);
 
-        __bang_write_zero(destSum, 2 * topk);
+        __bang_write_value(destSum, 2 * topk, 0);
         destSum[0] = srcGlobal[0];
         for(int i = 1; i < topk; i++){
             destSum[i] = destSum[i - 1] + srcGlobal[i];
@@ -183,7 +183,7 @@ __mlu_global__ void random_sampleD(T const *source, uint64_t *indices, uint64_t 
     uint64_t *srcInd = (uint64_t *)nram_bufferInd;//[maxNum]
     uint64_t *topkInd = srcInd + maxNum;//[2 * topk]
     uint64_t *indGlobal = topkInd + 2 * topk;
-    __bang_write_zero(topkInd, 2 * topk);
+    __bang_write_value(topkInd, 2 * topk, 0);
 
     T *src = (T *)nram_buffer;//[maxNum]
     T *srcTopk = src + maxNum;//[2 * topk]
@@ -307,8 +307,8 @@ __mlu_global__ void random_sampleD(T const *source, uint64_t *indices, uint64_t 
     __sync_all();
     //下面开始做类似于softmax变换
     T globalM = globalTopk[0];
-    __bang_write_zero(destSum, maxNum);
-    __bang_write_zero(destSumFinal, wSize);
+    __bang_write_value(destSum, maxNum, 0);
+    __bang_write_value(destSumFinal, wSize, 0);
     for(int r = 0; r < repeat; r++){
         __memcpy(src, source + r * taskSize + taskId * maxNum, maxNum * sizeof(T), GDRAM2NRAM);
         __bang_sub_scalar(src, src, globalM, maxNum);
@@ -317,7 +317,7 @@ __mlu_global__ void random_sampleD(T const *source, uint64_t *indices, uint64_t 
         __bang_add(destSum, destSum, src, maxNum);
     }
     if(step){
-        __bang_write_zero(src, maxNum);
+        __bang_write_value(src, maxNum, 0);
         __memcpy(src, source + repeat * taskSize + indStart, step * sizeof(T), GDRAM2NRAM);
         __bang_sub_scalar(src, src, globalM, step);
         __bang_mul_scalar(src, src, temInv, step);
@@ -360,7 +360,7 @@ __mlu_global__ void random_sampleD(T const *source, uint64_t *indices, uint64_t 
         __bang_active_exp_less_0(srcGlobal, srcGlobal, topk);
         __bang_mul_scalar(srcGlobal, srcGlobal, globalSumInv, topk);
 
-        __bang_write_zero(srcTopk, 2 * topk);
+        __bang_write_value(srcTopk, 2 * topk, 0);
         srcTopk[0] = srcGlobal[0];
         for(int i = 1; i < topk; i++){
             srcTopk[i] = srcTopk[i - 1] + srcGlobal[i];

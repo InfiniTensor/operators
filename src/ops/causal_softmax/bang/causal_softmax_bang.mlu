@@ -49,7 +49,7 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
                 __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//destSum前面(mask + 1 + lastI)为src，后面部分为最大值
                 __bang_sub_scalar(destSum, destSum, srcMax[0], maxNum);           //destSum前面(mask + 1 + lastI)为(src - M)，后面部分为0
                 __bang_active_exp_less_0(destSum, destSum, maxNum);               //destSum前面(mask + 1 + lastI)为exp(src - M)，后面部分为1
-                __bang_write_zero(src, maxNum);                                   //重新设置src全部为0
+                __bang_write_value(src, maxNum, 0);                                   //重新设置src全部为0
                 __memcpy(src, destSum, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//src前面(mask + 1 + lastI)为exp(src - M)，后面部分为0
 
                 if (maxNum >= wSize) {
@@ -69,7 +69,7 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
                 __bang_mul_scalar(src, src, globalSumInv, maxNum);
 
                 __memcpy(destination + indd, src, maxNum * sizeof(T), NRAM2GDRAM);
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = 1; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -80,8 +80,8 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
                 int newRemain = (mask + 1 + lastI) % maxNum;
                 int nR = (mask + 1 + lastI - newRemain) / maxNum;
 
-                __bang_write_zero(destSum, maxNum);
-                __bang_write_zero(destSumFinal, wSize);
+                __bang_write_value(destSum, maxNum, 0);
+                __bang_write_value(destSumFinal, wSize, 0);
 
                 destOldMax = -INFINITY;
                 destNewMax = -INFINITY;
@@ -161,7 +161,7 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
 
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = nR; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -204,7 +204,7 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
                 indi /= shape[j];
             }
             __bang_write_value(src, dimS, -INFINITY);
-            __bang_write_zero(destSumFinal, wSize);
+            __bang_write_value(destSumFinal, wSize, 0);
             int lastI = i % shape[ndim - 2];
             __memcpy(src, destination + indd, (mask + 1 + lastI) * sizeof(T), GDRAM2NRAM);
             __bang_argmax(srcMax, src, dimS);
@@ -212,7 +212,7 @@ __mlu_device__ void causal_softmaxKernel(T *destination, int *strideDest, int *s
             __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);
             __bang_sub_scalar(destSum, destSum, srcMax[0], dimS);
             __bang_active_exp_less_0(destSum, destSum, dimS);
-            __bang_write_zero(src, dimS);
+            __bang_write_value(src, dimS, 0);
             __memcpy(src, destSum, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);
             int segNum = dimS / wSize;//准备数值求和
             for (int strip = segNum / 2; strip > 0; strip = strip / 2) {
@@ -303,7 +303,7 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
                 __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//destSum前面(mask + 1 + lastI)为src，后面部分为最大值
                 __bang_sub_scalar(destSum, destSum, srcMax[0], maxNum);           //destSum前面(mask + 1 + lastI)为(src - M)，后面部分为0
                 __bang_active_exp_less_0(destSum, destSum, maxNum);               //destSum前面(mask + 1 + lastI)为exp(src - M)，后面部分为1
-                __bang_write_zero(src, maxNum);                                   //重新设置src全部为0
+                __bang_write_value(src, maxNum, 0);                                   //重新设置src全部为0
                 __memcpy(src, destSum, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//src前面(mask + 1 + lastI)为exp(src - M)，后面部分为0
 
                 if (maxNum >= wSize) {
@@ -323,7 +323,7 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
                 __bang_mul_scalar(src, src, globalSumInv, maxNum);
 
                 __memcpy(destination + indd, src, maxNum * sizeof(T), NRAM2GDRAM);
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = 1; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -334,8 +334,8 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
                 int newRemain = (mask + 1 + lastI) % maxNum;
                 int nR = (mask + 1 + lastI - newRemain) / maxNum;
 
-                __bang_write_zero(destSum, maxNum);
-                __bang_write_zero(destSumFinal, wSize);
+                __bang_write_value(destSum, maxNum, 0);
+                __bang_write_value(destSumFinal, wSize, 0);
 
                 destOldMax = -INFINITY;
                 destNewMax = -INFINITY;
@@ -415,7 +415,7 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
 
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = nR; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -455,7 +455,7 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
 
             indd += (indi % othersize) * strideD_f;
             __bang_write_value(src, dimS, -INFINITY);
-            __bang_write_zero(destSumFinal, wSize);
+            __bang_write_value(destSumFinal, wSize, 0);
             int lastI = i % othersize;
             __memcpy(src, destination + indd, (mask + 1 + lastI) * sizeof(T), GDRAM2NRAM);
             __bang_argmax(srcMax, src, dimS);
@@ -463,7 +463,7 @@ __mlu_global__ void causal_softmaxDim_2(T *destination, int strideD_f, int other
             __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);
             __bang_sub_scalar(destSum, destSum, srcMax[0], dimS);
             __bang_active_exp_less_0(destSum, destSum, dimS);
-            __bang_write_zero(src, dimS);
+            __bang_write_value(src, dimS, 0);
             __memcpy(src, destSum, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);
             int segNum = dimS / wSize;//准备数值求和
             for (int strip = segNum / 2; strip > 0; strip = strip / 2) {
@@ -551,7 +551,7 @@ __mlu_global__ void causal_softmaxDim_3(T *destination, int strideD_f, int strid
                 __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//destSum前面(mask + 1 + lastI)为src，后面部分为最大值
                 __bang_sub_scalar(destSum, destSum, srcMax[0], maxNum);           //destSum前面(mask + 1 + lastI)为(src - M)，后面部分为0
                 __bang_active_exp_less_0(destSum, destSum, maxNum);               //destSum前面(mask + 1 + lastI)为exp(src - M)，后面部分为1
-                __bang_write_zero(src, maxNum);                                   //重新设置src全部为0
+                __bang_write_value(src, maxNum, 0);                                   //重新设置src全部为0
                 __memcpy(src, destSum, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//src前面(mask + 1 + lastI)为exp(src - M)，后面部分为0
 
                 if (maxNum >= wSize) {
@@ -571,7 +571,7 @@ __mlu_global__ void causal_softmaxDim_3(T *destination, int strideD_f, int strid
                 __bang_mul_scalar(src, src, globalSumInv, maxNum);
 
                 __memcpy(destination + indd, src, maxNum * sizeof(T), NRAM2GDRAM);
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = 1; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -582,8 +582,8 @@ __mlu_global__ void causal_softmaxDim_3(T *destination, int strideD_f, int strid
                 int newRemain = (mask + 1 + lastI) % maxNum;
                 int nR = (mask + 1 + lastI - newRemain) / maxNum;
 
-                __bang_write_zero(destSum, maxNum);
-                __bang_write_zero(destSumFinal, wSize);
+                __bang_write_value(destSum, maxNum, 0);
+                __bang_write_value(destSumFinal, wSize, 0);
 
                 destOldMax = -INFINITY;
                 destNewMax = -INFINITY;
@@ -663,7 +663,7 @@ __mlu_global__ void causal_softmaxDim_3(T *destination, int strideD_f, int strid
 
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
-                __bang_write_zero(src, maxNum);
+                __bang_write_value(src, maxNum, 0);
                 for (int s = nR; s < repeat; s++) {
                     __memcpy(destination + indd + s * maxNum, src, maxNum * sizeof(T), NRAM2GDRAM);
                 }
@@ -705,11 +705,11 @@ __mlu_global__ void causal_softmaxDim_3(T *destination, int strideD_f, int strid
 
             indd += (indi % startDim) * strideD_f;
             __bang_write_value(src, dimS, -INFINITY);
-            __bang_write_zero(destSumFinal, wSize);
+            __bang_write_value(destSumFinal, wSize, 0);
             int lastI = i % middle;
             __memcpy(src, destination + indd, (mask + 1 + lastI) * sizeof(T), GDRAM2NRAM);//长度为dimsize的向量，只考虑前面mask + 1 + lastI部分的softmax
             __bang_argmax(srcMax, src, dimS);
-            __bang_write_zero(destSum, dimS);
+            __bang_write_value(destSum, dimS, 0);
             __memcpy(destSum, src, (mask + 1 + lastI) * sizeof(T), NRAM2NRAM);//初始化destSum为0，前面mask + 1 + lastI部分元素和src保持一致
             __bang_sub_scalar(destSum, destSum, srcMax[0], mask + 1 + lastI);//前面mask + 1 + lastI元素减去最大值M，后面的元素还是0
             __bang_active_exp_less_0(destSum, destSum, mask + 1 + lastI);//前面mask + 1 + lastI元素做指数变换，后面的元素还是0

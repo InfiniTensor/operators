@@ -68,7 +68,7 @@ __mlu_func__ float sum(const T *source, T *src, float *dst, int num_elements, in
         size_t curr_batch = std::min<size_t>(max_batch, num_elements - processed);
 
         if (curr_batch < max_batch) {
-            __bang_write_zero(src, max_batch + offset);
+            __bang_write_value(src, max_batch + offset, 0);
         }
 
         __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
@@ -90,7 +90,7 @@ __mlu_func__ float sumSquared(const T *source, T *src, float *dst, int num_eleme
         size_t curr_batch = std::min<size_t>(max_batch, num_elements - processed);
 
         if (curr_batch < max_batch) {
-            __bang_write_zero(src, max_batch + offset);
+            __bang_write_value(src, max_batch + offset, 0);
         }
 
         __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
@@ -138,7 +138,7 @@ __mlu_func__ float sumSquaredBatched(const T *source, T *src, float *dst, int nu
         size_t remainder = curr_batch % batch_size;
 
         // Ensure NRAM buffer is zeroed
-        __bang_write_zero(src, max_batch + offset);
+        __bang_write_value(src, max_batch + offset, 0);
 
         // Copy data to NRAM
         __memcpy(src + offset, source + processed, curr_batch * sizeof(T), GDRAM2NRAM);
@@ -258,7 +258,7 @@ __mlu_global__ void rmsnorm(T *output, const T *input, const Tw *weight,
         }
 
         // 计算平方和
-        __bang_write_zero(reduction_result, reduce_buffer_size);
+        __bang_write_value(reduction_result, reduce_buffer_size, 0);
         float sum_squared = sumSquaredBatched<T>(
             input + input_offset, input_cache, reduction_result, vector_size, max_batch_size);
         // 计算归一化因子
