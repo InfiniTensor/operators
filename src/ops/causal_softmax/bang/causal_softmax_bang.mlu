@@ -257,7 +257,7 @@ void causal_softmax(cnrtQueue_t queue, void *destination, int *strideDest, int *
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
 
     causal_softmaxUnion1<T><<<k_dim, k_type, queue>>>(y_, strideDest, shape, othersize, dimsize, dimS, mask, ndim);
     cnrtQueueSync(queue);
@@ -501,7 +501,7 @@ void causal_softmaxUnionDim_2(cnrtQueue_t queue, void *destination, int strideD_
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
 
     causal_softmaxDim_2<T><<<k_dim, k_type, queue>>>(y_, strideD_f, othersize, dimsize, dimS, mask);
     cnrtQueueSync(queue);
@@ -751,7 +751,7 @@ void causal_softmaxUnionDim_3(cnrtQueue_t queue, void *destination, int strideD_
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
 
     causal_softmaxDim_3<T><<<k_dim, k_type, queue>>>(y_, strideD_f, strideD_m, othersize, middle, dimsize, dimS, mask);
     cnrtQueueSync(queue);

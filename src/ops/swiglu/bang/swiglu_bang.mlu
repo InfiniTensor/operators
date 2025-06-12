@@ -110,7 +110,7 @@ void swigluUnionDim_2(cnrtQueue_t queue, void const *a, void const *b, void *c, 
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
     
     swigluDim_2<T><<<k_dim, k_type, queue>>>(a_, b_, c_, stride_a, stride_b, stride_c, othersize, dimsize);
     

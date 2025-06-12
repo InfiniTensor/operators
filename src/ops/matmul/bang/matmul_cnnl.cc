@@ -27,8 +27,8 @@ infiniopStatus_t bangCreateMatmulDescriptor(BangHandle_t handle,
     cnnlMatMulDescriptor_t opDesc;
     cnnlMatMulAlgo_t algo;
     cnnlMatMulHeuristicResult_t algoResult;
-    cnnlMatMulDescCreate(&opDesc);
-    cnnlMatMulAlgoCreate(&algo);
+    cnnlCreateMatMulDescriptor(&opDesc);
+    cnnlCreateMatMulAlgo(&algo);
     cnnlCreateMatMulHeuristicResult(&algoResult);
     int32_t use_stride = true;
     cnnlSetMatMulDescAttr(opDesc, CNNL_MATMUL_USE_STRIDE, &use_stride,
@@ -59,8 +59,8 @@ infiniopStatus_t bangDestroyMatmulDescriptor(MatmulBangDescriptor_t desc) {
     cnnlDestroyTensorDescriptor(desc->aDesc);
     cnnlDestroyTensorDescriptor(desc->bDesc);
     cnnlDestroyTensorDescriptor(desc->cDesc);
-    cnnlMatMulDescDestroy(desc->opDesc);
-    cnnlMatMulAlgoDestroy(desc->algo);
+    cnnlDestroyMatMulDescriptor(desc->opDesc);
+    cnnlDestroyMatMulAlgo(desc->algo);
     cnnlDestroyMatMulHeuristicResult(desc->algoResult);
     delete desc;
     return STATUS_SUCCESS;
@@ -75,13 +75,13 @@ void matmul_cnnl_f16(MatmulBangDescriptor_t desc, void *workspace, void *c, floa
     use_cnnl(desc->cnnl_handles, desc->device_id, (cnrtQueue_t) stream,
              [&](cnnlHandle_t handle) {
                  int count = 0;
-                 cnnlGetBatchMatMulAlgoHeuristic(handle, desc->opDesc, desc->aDesc,
+                 cnnlGetBatchMatMulExAlgoHeuristic(handle, desc->opDesc, desc->aDesc,
                                                  desc->bDesc, desc->cDesc,
                                                  NULL, 1, &desc->algoResult, &count);
                  size_t wsSize;
-                 cnnlGetBatchMatMulHeuristicResult(desc->algoResult, desc->algo, &wsSize);
+                 cnnlGetBatchMatMulExHeuristicResult(desc->algoResult, desc->algo, &wsSize);
                  cnrtMalloc(&workspace, wsSize);
-                 cnnlBatchMatMulBCast_v2(handle, desc->opDesc, desc->algo,
+                 cnnlBatchMatMulEx(handle, desc->opDesc, desc->algo,
                                          &alpha, desc->aDesc, a,
                                          desc->bDesc, b,
                                          &beta, desc->cDesc, c,

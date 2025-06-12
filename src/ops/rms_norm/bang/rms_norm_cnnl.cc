@@ -76,16 +76,24 @@ infiniopStatus_t cnnlRMSNorm(RMSNormCnnlDescriptor_t desc,
 
     use_cnnl(desc->pool, desc->device_id, (cnrtQueue_t)stream,
              [&](cnnlHandle_t handle) {
-                 cnnlFuseNorm(handle, 
-                             desc->opDesc, 
-                             desc->xDesc, x,
-                             desc->wDesc, w,
-                             nullptr, nullptr,
-                             nullptr, nullptr,
-                             nullptr, nullptr,
-                             workspace, workspace_size,
-                             desc->yDesc, y,
-                             nullptr, nullptr);
+                 cnnlFuseNorm_v4(handle,
+                                       desc->xDesc, x,        // Input tensor
+                                       nullptr, nullptr,         // Input scale (unused)
+                                       desc->wDesc, w,        // Norm scale (gamma)
+                                       nullptr, nullptr,         // Norm bias (beta, unused)
+                                       nullptr, nullptr,         // Residual input (unused)
+                                       nullptr, nullptr,         // Bias (unused)
+                                       1e-5f,                    // Epsilon
+                                       CNNL_QUANTIZE_NONE,       // No quantization
+                                       false,                    // Don't store output before norm
+                                       false,                    // Don't store output after norm
+                                       CNNL_TRANSFORMER_RMSNORM, // Norm type (RMSNorm)
+                                       CNNL_DTYPE_FLOAT,         // Compute precision (float)
+                                       workspace, workspace_size,
+                                       desc->yDesc, y,  // Output
+                                       nullptr, nullptr,   // Output before norm (unused)
+                                       nullptr, nullptr,   // Output quant scale (unused)
+                                       nullptr, nullptr);  // Output after norm (unused)
              });
 
     return STATUS_SUCCESS;

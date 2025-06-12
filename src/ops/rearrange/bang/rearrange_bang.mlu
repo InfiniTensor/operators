@@ -81,7 +81,7 @@ void rearrangeUnion(cnrtQueue_t queue, void *destination, void const *source,
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
 
     rearrange<<<k_dim, k_type, queue>>>(dst, src, ndim,
                                         dim_last, dim_2nd_last, dim_3rd_last,

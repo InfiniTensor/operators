@@ -452,7 +452,7 @@ void random_sampleUnion(cnrtQueue_t queue, void *workspace, void const *source, 
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
 
     int taskNum = k_dim.x * k_dim.y * k_dim.z;
     if(topp > 0 && topk > 1){

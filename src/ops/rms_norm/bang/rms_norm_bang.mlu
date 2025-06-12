@@ -304,7 +304,7 @@ void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int 
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
     int dimsize = shape[ndim - 1];
     int dimS;
     float mi = log2(dimsize);

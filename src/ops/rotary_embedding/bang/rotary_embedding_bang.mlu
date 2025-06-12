@@ -398,7 +398,7 @@ void RoPEUnion(cnrtQueue_t queue, void *destination, void const *pos_ids, void c
     k_dim.x = 4;
     k_dim.y = 1;
     k_dim.z = 1;
-    k_type = CNRT_FUNC_TYPE_UNION1;
+    k_type = cnrtFuncTypeUnion1;
     
     
     RoPE<T><<<k_dim, k_type, queue>>>(t_, pos_, sin_, cos_, stride_0, stride_1, nt, nh, dimsize);
