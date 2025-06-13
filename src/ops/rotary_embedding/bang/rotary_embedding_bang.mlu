@@ -190,7 +190,6 @@ void RoPEUnion(cnrtQueue_t queue, void *destination, void const *pos_ids, void c
     k_type = cnrtFuncTypeUnion1;
 
     RoPE<T><<<k_dim, k_type, queue>>>(t_, pos_, sin_, cos_, seqlen, nhead, nt, nh, dimsize);
-    cnrtQueueSync(queue);
 }
 
 void RoPE_bang_f16(RoPEBangDescriptor_t desc, void *t,

@@ -89,7 +89,6 @@ void rearrangeUnion(cnrtQueue_t queue, void *destination, void const *source,
                                         src_stride_2nd_last, src_stride_3rd_last,
                                         dtSize);
 
-    cnrtQueueSync(queue);
 }
 
 void rearrange_bang(RearrangeBangDescriptor_t desc, void *dst,

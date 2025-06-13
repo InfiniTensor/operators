@@ -333,7 +333,6 @@ void RMSNormUnion(cnrtQueue_t queue, void *y, void const *x, void const *w, int 
 
     rmsnorm<T, Tw><<<k_dim, k_type, queue>>>(y_, x_, w_, mlu_shape, mlu_stride_y, mlu_stride_x, eps, ndim, dimS);
 
-    cnrtQueueSync(queue);
     cnrtFree(tmpDevice);
 }
 void rms_norm_bang_f16(RMSNormBangDescriptor_t desc, void *y, void const *x, void const *w,
