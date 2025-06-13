@@ -10,32 +10,33 @@ __nram__ char nram_buffer[NRAM_MAX_SIZE];
 
 template<typename Tdata>
 __mlu_device__ void process_chunk(
-    Tdata *y, const float *sin_table, const float *cos_table,
-    float *srcSin, float *srcCos, float *sin0, float *cos0,
-    float *sin1, float *cos1, float *tmpa, float *tmpb,
-    Tdata *srca, Tdata *srcb, Tdata *src,
-    int src_index, int dest_index,
-    int chunk_size, int half_chunk,
-    int segsize, int segsize_table,
-    int srcStrideL, int destStrideL, int srcStrideW, int destStrideW,
-    int srcStrideL_table, int destStrideL_table) {
+    Tdata *y,
+    const float *sin_table, const float *cos_table,
+    float *sin_cache, float *cos_cache,
+    float *sin0, float *cos0, float *sin1, float *cos1,
+    float *tmpa, float *tmpb,
+    Tdata *input_0, Tdata *input_1, Tdata *input_cache,
+    int theta_index, int dst_index,
+    int chunk_size, int half_chunk, int data_segsize, int theta_segsize,
+    int src_load_stride, int dst_load_stride, int src_write_stride, int dst_write_stride,
+    int theta_src_load_stride, int theta_dst_load_stride) {
     // Load sin/cos data
-    __memcpy(srcSin, sin_table + src_index, chunk_size * sizeof(float), GDRAM2NRAM);
-    __memcpy(sin0, srcSin, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, chunk_size);
-    __memcpy(sin1, srcSin + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, chunk_size);
+    __memcpy(sin_cache, sin_table + theta_index, chunk_size * sizeof(float), GDRAM2NRAM);
+    __memcpy(sin0, sin_cache, theta_segsize, NRAM2NRAM, theta_dst_load_stride, theta_src_load_stride, chunk_size);
+    __memcpy(sin1, sin_cache + 1, theta_segsize, NRAM2NRAM, theta_dst_load_stride, theta_src_load_stride, chunk_size);
 
-    __memcpy(srcCos, cos_table + src_index, chunk_size * sizeof(float), GDRAM2NRAM);
-    __memcpy(cos0, srcCos, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, chunk_size);
-    __memcpy(cos1, srcCos + 1, segsize_table, NRAM2NRAM, destStrideL_table, srcStrideL_table, chunk_size);
+    __memcpy(cos_cache, cos_table + theta_index, chunk_size * sizeof(float), GDRAM2NRAM);
+    __memcpy(cos0, cos_cache, theta_segsize, NRAM2NRAM, theta_dst_load_stride, theta_src_load_stride, chunk_size);
+    __memcpy(cos1, cos_cache + 1, theta_segsize, NRAM2NRAM, theta_dst_load_stride, theta_src_load_stride, chunk_size);
 
     // Load input data
-    __memcpy(src, y + dest_index, chunk_size * sizeof(Tdata), GDRAM2NRAM);
-    __memcpy(srca, src, segsize, NRAM2NRAM, destStrideL, srcStrideL, chunk_size);
-    __memcpy(srcb, src + 1, segsize, NRAM2NRAM, destStrideL, srcStrideL, chunk_size);
+    __memcpy(input_cache, y + dst_index, chunk_size * sizeof(Tdata), GDRAM2NRAM);
+    __memcpy(input_0, input_cache, data_segsize, NRAM2NRAM, dst_load_stride, src_load_stride, chunk_size);
+    __memcpy(input_1, input_cache + 1, data_segsize, NRAM2NRAM, dst_load_stride, src_load_stride, chunk_size);
 
     // Convert to float and compute RoPE
-    __bang_half2float(tmpa, srca, half_chunk);
-    __bang_half2float(tmpb, srcb, half_chunk);
+    __bang_half2float(tmpa, input_0, half_chunk);
+    __bang_half2float(tmpb, input_1, half_chunk);
 
     __bang_mul(cos0, tmpa, cos0, half_chunk);
     __bang_mul(sin0, tmpb, sin0, half_chunk);
@@ -46,12 +47,12 @@ __mlu_device__ void process_chunk(
     __bang_add(cos1, sin1, cos1, half_chunk);
 
     // Convert back and store
-    __bang_float2half_dn(srca, cos0, half_chunk);
-    __bang_float2half_dn(srcb, cos1, half_chunk);
+    __bang_float2half_dn(input_0, cos0, half_chunk);
+    __bang_float2half_dn(input_1, cos1, half_chunk);
 
-    __memcpy(src, srca, segsize, NRAM2NRAM, destStrideW, srcStrideW, chunk_size);
-    __memcpy(src + 1, srcb, segsize, NRAM2NRAM, destStrideW, srcStrideW, chunk_size);
-    __memcpy(y + dest_index, src, chunk_size * sizeof(Tdata), NRAM2GDRAM);
+    __memcpy(input_cache, input_0, data_segsize, NRAM2NRAM, dst_write_stride, src_write_stride, chunk_size);
+    __memcpy(input_cache + 1, input_1, data_segsize, NRAM2NRAM, dst_write_stride, src_write_stride, chunk_size);
+    __memcpy(y + dst_index, input_cache, chunk_size * sizeof(Tdata), NRAM2GDRAM);
 }
 
 template<typename Tdata>
@@ -66,14 +67,14 @@ __mlu_global__ void RoPE(Tdata *y, const uint64_t *pos_ids, const float *sin_tab
     const int half_chunk = chunk_size / 2;
 
     // Common stride configurations
-    const int segsize = sizeof(Tdata);
-    const int srcStrideL = 2 * sizeof(Tdata);
-    const int destStrideL = 1 * sizeof(Tdata);
-    const int srcStrideW = 1 * sizeof(Tdata);
-    const int destStrideW = 2 * sizeof(Tdata);
-    const int segsize_table = sizeof(float);
-    const int srcStrideL_table = 2 * sizeof(float);
-    const int destStrideL_table = 1 * sizeof(float);
+    const int data_segsize = sizeof(Tdata);
+    const int src_load_stride = 2 * sizeof(Tdata);
+    const int dst_load_stride = 1 * sizeof(Tdata);
+    const int src_write_stride = 1 * sizeof(Tdata);
+    const int dst_write_stride = 2 * sizeof(Tdata);
+    const int theta_segsize = sizeof(float);
+    const int theta_src_load_stride = 2 * sizeof(float);
+    const int theta_dst_load_stride = 1 * sizeof(float);
 
     // Task distribution
     const int othersize = seqlen * nhead;
@@ -94,37 +95,35 @@ __mlu_global__ void RoPE(Tdata *y, const uint64_t *pos_ids, const float *sin_tab
     }
 
     // Main processing buffers
-    float *srcSin = (float *) nram_buffer1;
-    float *srcCos = srcSin + chunk_size;
-    float *sin0 = srcCos + chunk_size;
+    float *sin_cache = (float *) nram_buffer1;
+    float *cos_cache = sin_cache + chunk_size;
+    float *sin0 = cos_cache + chunk_size;
     float *cos0 = sin0 + 3 * half_chunk;
     float *sin1 = cos0 + 3 * half_chunk;
     float *cos1 = sin1 + 3 * half_chunk;
     float *tmpa = cos1 + 3 * half_chunk;
     float *tmpb = tmpa + half_chunk;
 
-    Tdata *srca = (Tdata *) (tmpb + half_chunk);
-    Tdata *srcb = srca + half_chunk;
-    Tdata *src = srcb + 3 * half_chunk;
+    Tdata *input_0 = (Tdata *) (tmpb + half_chunk);
+    Tdata *input_1 = input_0 + half_chunk;
+    Tdata *input_cache = input_1 + 3 * half_chunk;
 
     // Main processing loop
     for (int i = indStart; i < indStart + step; i++) {
-        // Calculate y index
-        int indd = 0;
-        int indi = i;
-        indd += (indi % nhead) * y_stride_nhead;
-        indi /= nhead;
-        indd += (indi % seqlen) * y_stride_seqlen;
+        // Calculate y rot_offset
+        int seq_idx = i / nhead;
+        int head_idx = i % nhead;
+        int output_offset = seq_idx % seqlen * y_stride_seqlen + head_idx * y_stride_nhead;
 
-        // Get position index
-        uint64_t pos_idx = use_pos_ids_buffer ? srcP[(indi % seqlen)] : pos_ids[(indi % seqlen)];
-        int index = pos_idx * table_dim;
+        // Get position rot_offset
+        uint64_t pos_idx = use_pos_ids_buffer ? srcP[(seq_idx % seqlen)] : pos_ids[(seq_idx % seqlen)];
+        int rot_offset = pos_idx * table_dim;
 
         // Determine processing parameters
         int current_chunk_size;
         int current_half_chunk;
-        int src_offset;
-        int dest_offset;
+        int theta_offset;
+        int dst_offset;
         int repeat_count = 1;
         bool process_remainder = false;
 
@@ -138,18 +137,18 @@ __mlu_global__ void RoPE(Tdata *y, const uint64_t *pos_ids, const float *sin_tab
         for (int s = 0; s < repeat_count; s++) {
             current_chunk_size = chunk_size;
             current_half_chunk = half_chunk;
-            src_offset = index + s * chunk_size;
-            dest_offset = indd + s * chunk_size;
+            theta_offset = rot_offset + s * chunk_size;
+            dst_offset = output_offset + s * chunk_size;
 
             process_chunk<Tdata>(
                 y, sin_table, cos_table,
-                srcSin, srcCos, sin0, cos0, sin1, cos1, tmpa, tmpb,
-                srca, srcb, src,
-                src_offset, dest_offset,
+                sin_cache, cos_cache, sin0, cos0, sin1, cos1, tmpa, tmpb,
+                input_0, input_1, input_cache,
+                theta_offset, dst_offset,
                 current_chunk_size, current_half_chunk,
-                segsize, segsize_table,
-                srcStrideL, destStrideL, srcStrideW, destStrideW,
-                srcStrideL_table, destStrideL_table);
+                data_segsize, theta_segsize,
+                src_load_stride, dst_load_stride, src_write_stride, dst_write_stride,
+                theta_src_load_stride, theta_dst_load_stride);
         }
 
         // Process remainder if needed
@@ -157,18 +156,18 @@ __mlu_global__ void RoPE(Tdata *y, const uint64_t *pos_ids, const float *sin_tab
             int remain = table_dim % chunk_size;
             current_chunk_size = remain;
             current_half_chunk = remain / 2;
-            src_offset = index + repeat_count * chunk_size;
-            dest_offset = indd + repeat_count * chunk_size;
+            theta_offset = rot_offset + repeat_count * chunk_size;
+            dst_offset = output_offset + repeat_count * chunk_size;
 
             process_chunk<Tdata>(
                 y, sin_table, cos_table,
-                srcSin, srcCos, sin0, cos0, sin1, cos1, tmpa, tmpb,
-                srca, srcb, src,
-                src_offset, dest_offset,
+                sin_cache, cos_cache, sin0, cos0, sin1, cos1, tmpa, tmpb,
+                input_0, input_1, input_cache,
+                theta_offset, dst_offset,
                 current_chunk_size, current_half_chunk,
-                segsize, segsize_table,
-                srcStrideL, destStrideL, srcStrideW, destStrideW,
-                srcStrideL_table, destStrideL_table);
+                data_segsize, theta_segsize,
+                src_load_stride, dst_load_stride, src_write_stride, dst_write_stride,
+                theta_src_load_stride, theta_dst_load_stride);
         }
     }
 }
