@@ -68,6 +68,7 @@ def test(lib, handle, torch_device, x_shape, x_stride=None, x_dtype=torch.float1
             None,
         )
     )
+    #print(x.flatten()[0], ans.flatten()[0])
     assert torch.allclose(x, ans, atol=0, rtol=1e-2)
     check_error(lib.infiniopDestroyCausalSoftmaxDescriptor(descriptor))
 
@@ -104,6 +105,14 @@ def test_ascend(lib, test_cases):
     handle = create_handle(lib, device)
     for x_shape, x_stride in test_cases:
         test(lib, handle, "npu", x_shape, x_stride)
+
+    destroy_handle(lib, handle)
+def test_teco(lib, test_cases):
+    import torch_sdaa
+    device = DeviceEnum.DEVICE_TECO
+    handle = create_handle(lib, device)
+    for x_shape, x_stride in test_cases:
+        test(lib, handle, "sdaa", x_shape, x_stride)
 
     destroy_handle(lib, handle)
 
@@ -147,6 +156,8 @@ if __name__ == "__main__":
         test_bang(lib, test_cases)
     if args.ascend:
         test_ascend(lib, test_cases)
-    if not (args.cpu or args.cuda or args.bang or args.ascend):
+    if args.teco:
+        test_teco(lib, test_cases)
+    if not (args.cpu or args.cuda or args.bang or args.ascend or args.teco):
         test_cpu(lib, test_cases)
     print("Test passed!")

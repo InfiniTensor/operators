@@ -7,8 +7,8 @@
 #endif
 #ifdef ENABLE_NV_GPU
 #include "../../devices/cuda/common_cuda.h"
-#include "cuda/causal_softmax.cuh"
 #include "../../devices/cuda/cuda_handle.h"
+#include "cuda/causal_softmax.cuh"
 #endif
 #ifdef ENABLE_CAMBRICON_MLU
 #include "../../devices/bang/bang_handle.h"
@@ -17,6 +17,9 @@
 #endif
 #ifdef ENABLE_ASCEND_NPU
 #include "ascend/causal_softmax_aclnn.h"
+#endif
+#ifdef ENABLE_TECO_SDAA
+#include "teco/causal_softmax_sdaa.h"
 #endif
 
 __C infiniopStatus_t infiniopCreateCausalSoftmaxDescriptor(
@@ -30,7 +33,7 @@ __C infiniopStatus_t infiniopCreateCausalSoftmaxDescriptor(
 #endif
 #ifdef ENABLE_NV_GPU
         case DevNvGpu: {
-            return cudaCreateCausalSoftmaxDescriptor((CudaHandle_t)handle, (CausalSoftmaxCudaDescriptor_t *) desc_ptr, y_desc);
+            return cudaCreateCausalSoftmaxDescriptor((CudaHandle_t) handle, (CausalSoftmaxCudaDescriptor_t *) desc_ptr, y_desc);
         }
 
 #endif
@@ -44,6 +47,10 @@ __C infiniopStatus_t infiniopCreateCausalSoftmaxDescriptor(
         case DevAscendNpu: {
             return aclnnCreateCausalSoftmaxDescriptor((AscendHandle_t) handle, (CausalSoftmaxAclnnDescriptor_t *) desc_ptr, y_desc);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoCreateCausalSoftmaxDescriptor((TecoHandle_t) handle, (CausalSoftmaxTecoDescriptor_t *) desc_ptr, y_desc);
 #endif
     }
     return STATUS_BAD_DEVICE;
@@ -73,6 +80,10 @@ __C infiniopStatus_t infiniopGetCausalSoftmaxWorkspaceSize(infiniopCausalSoftmax
             return aclnnGetCausalSoftmaxWorkspaceSize((CausalSoftmaxAclnnDescriptor_t) desc, size);
         }
 #endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoGetCausalSoftmaxWorkspaceSize((CausalSoftmaxTecoDescriptor_t) desc, size);
+#endif
     }
     return STATUS_BAD_DEVICE;
 }
@@ -100,6 +111,10 @@ __C infiniopStatus_t infiniopCausalSoftmax(infiniopCausalSoftmaxDescriptor_t des
             return aclnnCausalSoftmax((CausalSoftmaxAclnnDescriptor_t) desc, workspace, workspace_size, data, stream);
         }
 #endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoCausalSoftmax((CausalSoftmaxTecoDescriptor_t) desc, workspace, workspace_size, data, stream);
+#endif
     }
     return STATUS_BAD_DEVICE;
 }
@@ -126,6 +141,10 @@ __C infiniopStatus_t infiniopDestroyCausalSoftmaxDescriptor(infiniopCausalSoftma
         case DevAscendNpu: {
             return aclnnDestroyCausalSoftmaxDescriptor((CausalSoftmaxAclnnDescriptor_t) desc);
         }
+#endif
+#ifdef ENABLE_TECO_SDAA
+        case DevTecoSDAA:
+            return tecoDestroyCausalSoftmaxDescriptor((CausalSoftmaxTecoDescriptor_t) desc);
 #endif
     }
     return STATUS_BAD_DEVICE;
