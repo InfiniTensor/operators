@@ -31,21 +31,9 @@ infiniopRandomSampleDescriptor_t = POINTER(RandomSampleDescriptor)
 
 def random_sample(data, random_val, topp, topk, voc, temperature, torch_device):
     indices = torch.zeros([topk], dtype = torch.int64)
-    dataNp = data.clone().detach()
-    sorted_indices = torch.arange(voc)
-    
-    for i in range(topk):
-        for j in range(i + 1, voc):
-            if(dataNp[i] < dataNp[j]):
-                tmp = dataNp[i].clone().detach()
-                dataNp[i] = dataNp[j].clone().detach()
-                dataNp[j] = tmp
-
-                tmpInd = sorted_indices[i].clone().detach()
-                sorted_indices[i] = sorted_indices[j].clone().detach()
-                sorted_indices[j] = tmpInd
+    dataNp = data.clone()
                 
-    #sorted_indices = torch.argsort(dataNp, descending=True)
+    sorted_indices = torch.argsort(dataNp, descending=True)
     indices = sorted_indices[:topk] 
     
     dataNp = dataNp[sorted_indices]
@@ -53,25 +41,22 @@ def random_sample(data, random_val, topp, topk, voc, temperature, torch_device):
     globalM = dataNp[0]
     dataNp = (dataNp - globalM) / temperature
     dataNp = torch.softmax(dataNp.float(), dim = 0)
-    sum_s = 0
+    
+    for i in range(1, topk):
+        dataNp[i] = dataNp[i] + dataNp[i - 1]
+    
     for end in range(topk):
-        sum_s += dataNp[end]
-        if(sum_s >= topp):
+        if(dataNp[end] >= topp):
             break
     if(end < topk - 1):
         end += 1
     else:
         end = topk
     
-    sum_s = 0
-    for i in range(end):
-        sum_s += dataNp[i]
-    random_val *= sum_s
+    random_val *= dataNp[end - 1]
     
-    sum_s = 0
     for i in range(end):
-        sum_s += dataNp[i]
-        if(random_val < sum_s):
+        if(random_val < dataNp[i]):
             return indices[i]
 
 def random_sample_0(data):
@@ -129,7 +114,7 @@ def test(lib, handle, torch_device, voc, random_val, topp, topk, temperature, x_
     )
     if torch_device == "npu":
         torch.npu.synchronize()
-
+    
     assert indices[0].type(ans.dtype) == ans or data[ans] == data[indices[0]]
     check_error(lib.infiniopDestroyRandomSampleDescriptor(descriptor))
     print("Test passed!")
@@ -168,7 +153,13 @@ def test_ascend(lib, test_cases):
         test(lib, handle, "npu", voc, random_val, topp, topk, temperature)
     destroy_handle(lib, handle) 
     
-
+def test_teco(lib, test_cases):
+    import torch_sdaa
+    device = DeviceEnum.DEVICE_TECO
+    handle = create_handle(lib, device)
+    for (voc, random_val, topp, topk, temperature) in test_cases:
+        test(lib, handle, "sdaa", voc, random_val, topp, topk, temperature)
+    destroy_handle(lib, handle)
 
 if __name__ == "__main__":
     test_cases = [
@@ -224,6 +215,9 @@ if __name__ == "__main__":
         test_bang(lib, test_cases)
     if args.ascend:
         test_ascend(lib, test_cases)
-    if not (args.cpu or args.cuda or args.bang or args.ascend):
+    if args.teco:
+        test_teco(lib, test_cases)
+
+    if not (args.cpu or args.cuda or args.bang or args.ascend or args.teco):
         test_cpu(lib, test_cases)
     print("\033[92mTest passed!\033[0m")
